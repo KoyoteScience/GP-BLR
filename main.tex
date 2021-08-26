@@ -2,10 +2,14 @@
 \usepackage{amsmath}
 \usepackage{graphicx}
 \usepackage{biblatex} 
+\usepackage{authblk}
+\usepackage{mathtools}
+\usepackage{hyperref}
 \addbibresource{three_books.bib}
 
-\title{Gaussian Processes and Equivalent Bayesian Linear Regressions}
-\author{Douglas Mason}
+\title{Gaussian processes and their equivalent Bayesian linear regressions}
+\author[1]{Douglas Mason}
+\affil[1]{Koyote Science, LLC \footnote{\href{http://www.koyotescience.com}{\texttt{http://www.koyotescience.com}}}}
 \date{August 2021}
 
 \begin{document}
@@ -14,247 +18,389 @@
 
 \section{Introduction}
 
-Finding the equivalent Bayesian linear regression (BLR) to a Gaussian process (GP) can provide substantial benefits in modeling including (1) it provides potential efficiency savings, (2) it aids interpretability, (3) it is easy to combine multiple models into one. However, while the three major textbooks on the subject \cite{bishop, murphy, rasmussen} cover the subject extensively, it surprised me that they didn't provide a practical side-by-side comparison or recipe for converting the kernel used to generate a GP to an equivalent set of basis functions for a BLR.
+Finding the equivalent Bayesian linear regression (BLR) to a Gaussian process (GP) can provide substantial benefits in modeling including (1) enormous efficiency savings with large amounts of data, (2) access to incremental (sequential or online) computation methods, (3) access to vetted approximation methods for efficiency (such as the Laplace approximation for regressors, not just classifiers), (4) easier interpretability, and (5) the ability to effortlessly to combine multiple models into one without using bespoke software libraries. However, while the three major textbooks on the subject \cite{bishop, murphy, rasmussen} cover the subject extensively, it surprised me that they didn't provide a practical side-by-side comparison or recipe for converting the kernel used to generate a GP to an equivalent set of basis functions for a BLR. Moreover, we can look at Gaussian processes as an extension of Bayesian linear regression into the territory of small data, where the number of training points is less than the number of features, which is an important problem space for optimization procedures where evaluating a function may take a substantial amount of time. Bringing together the best of both worlds is enormously beneficial to anyone working within the optimization problem space.
 
-Why not remains a mystery to me, but it actually takes a lot of work to get the equivalence just right. This document covers the recipe I arrived at after working through the problem. It is accompanied by a Github repository which can be accessed at https://github.com/KoyoteScience/GP-BLR.
+Why this subject isn't lucidly explained in any established textbooks or lectures notes we could find remains a mystery to me, but it actually takes a lot of work to get the equivalence just right. This document covers the recipe we arrived at after working through the problem, and the insights we learned along the way. You are free to explore for yourself using the  Github repository which can be accessed at https://github.com/KoyoteScience/GP-BLR.
 
+Studying BLR and GP side-by-side is critical for developing any Bayesian application, since these are among only a few models in  circulation that allow you to learn the parameters using explicit and deterministic update rules. In other words, if we want to put Bayesian models into production with calibrated uncertainty predictions, these two are the robust, reliable baselines from which all other approaches are compared. Moreover, because the computation of these models is deterministic, we avoid the horrible pitfalls of Markov chain Monte Carlo, and because they are exact, we avoid the pitfalls of variational inference. As we will cover, both are actually parts of the same continuum between high featurization and large amounts of data. 
 
-\section{Bayesian Linear Regression}
-Bayesian linear regression can be defined by assuming that we can model a predictor as follows:
+A quick glossary: scalars are presented as upper- or lower-case English or Greek letters with normal weight, such as $n$ or $N$, while vectors are presented as lower-case English or Greek letters in bold, such as $\mathbf{v}$ or $\boldsymbol{\phi}$. Row vectors are presented normally, and column vectors with the transpose operator $\mathbf{v}^\top$. The dot or inner product is two vectors multiplied as $\mathbf{v}^\top \mathbf{v}$ and the outer product is two vectors multiplied as $\mathbf{v} \mathbf{v}^\top$. Matrices are presented as upper-case letters with bold weight, such as $\mathbf{M}$ or $\boldsymbol{\Phi}$. For variables that refer to the posterior (after $N$ training samples), their prior counterparts are denoted by the $p$ subscript.
 
+\section{Bayesian linear regression}
+
+Bayesian linear regression can be defined by modeling a predictor
 \begin{equation}
-    y=f(\mathbf{x})=\mathbf{\theta}^\top\mathbf{x}
+    y=f(\mathbf{x})=\boldsymbol{\theta}^\top\mathbf{x}
 \end{equation} 
-
 given a prior distribution for our model parameters $\boldsymbol{\theta}$ defined as 
-
 \begin{equation}
-    \boldsymbol{\theta}_p \sim \mathcal{N}(\mathbf{0},\Sigma_p^{-1})
+    \boldsymbol{\theta}_p \sim \mathcal{N}(\mathbf{0},\Sigma_p)
 \end{equation} 
-
-using the convention whereby the normal distribution is defined by two arguments, the means in each dimension and the covariance among the dimensions. Given a set of N observations, over the independent space $x$ and the dependent space $y$, gives us the matrix $X$ of observations in the independent space and the vector $\mathbf{y}$ of corresponding observations in the dependent space.
-
+using the convention whereby the normal distribution is defined by two arguments, the means in each dimension and the covariance among the dimensions. Given a set of $N$ observations, over the independent space $\mathcal{X}$ and the dependent space $\mathcal{Y}$, gives us the matrix $\mathbf{X}$ of observations in the independent space and the vector $\mathbf{y}$ of corresponding observations in the dependent space.
 \begin{equation}
-    \Sigma^{-1} = X X^\top + \Sigma_p
-\end{equation} 
+    \boldsymbol{\Sigma}^{-1} = \sigma^{-2}\mathbf{XX}^\top + \boldsymbol{\Sigma}_p^{-1}
+\end{equation}
 
+This gives us
 \begin{equation}
-    \boldsymbol{\theta}\sim\mathcal{N}(\Sigma X^\top \mathbf{y} ,\sigma^2\Sigma)
+    \boldsymbol{\theta}\sim\mathcal{N}( \sigma^{-2}\boldsymbol{\Sigma} \mathbf{X}^\top \mathbf{y},\boldsymbol{\Sigma})
 \end{equation} 
-
-where $\sigma$ is the noise parameter, or the square-root of the sum of squared residuals. This gives us
-
+and
 \begin{equation}
-    \mathbf{y}\sim\mathcal{N}(X \Sigma X^\top \mathbf{y} ,\sigma^2X^\top\Sigma X)
+    \mathbf{y}\sim\mathcal{N}\left(\sigma^{-2}\mathbf{X}  \boldsymbol{\Sigma} \mathbf{X}^\top \mathbf{y} ,\mathbf{X}^\top \boldsymbol{\Sigma} \mathbf{X} +\sigma^2\ \mathbf{I}_N\right)
 \end{equation} 
+where $\sigma$ is the noise parameter, or the square-root of the sum of squared residuals., and the term $\sigma^2 \mathbf{I}$ provides the uncertainty for repeated measurements of $y$ at the same $\mathbf{x}$.
+
+The equivalent perspective of $L2$ regularization gives us a regularization constant $\lambda=\sigma^2/\sigma_p^2$ where $\sigma_p$ represents the noise term for the prior. This implies that we more strongly regularize our results (draw weights towards zero) as we decrease the noise parameter in the prior compared to the noise parameter in the posterior. 
+
+The above formulation makes it clear how the covariance matrix of our parameters evolves over inference from $\boldsymbol{\Sigma}_p$ to $\boldsymbol{\Sigma}$ and how this affects our predictions. If we don't keep $\sigma$ fixed but instead learn it from our data or use linear algebra identities to define it, we may prefer to work with the quantity 
+\begin{equation}
+\label{eq:S}
+    \mathbf{S}^{-1} = \sigma^2\boldsymbol{\Sigma}^{-1}=\mathbf{XX}^\top + \sigma^2\mathbf{S}_p^{-1}
+\end{equation}
+giving us
+\begin{equation}
+    \boldsymbol{\theta}\sim\mathcal{N}( \mathbf{S} \mathbf{X}^\top \mathbf{y},\sigma^2\mathbf{S})
+\end{equation} 
+and
+\begin{equation}
+    \mathbf{y}\sim\mathcal{N}\left(\mathbf{X}  \mathbf{S} \mathbf{X}^\top \mathbf{y} ,\sigma^2\left(\mathbf{X}^\top \mathbf{S}\mathbf{X} + \mathbf{I}_N\right)\right)
+\end{equation}
+which makes it far clearer that the covariance matrices for both our weights and predictions are proportional to the noise parameter squared, while the mean weights and predictions only depend upon it through Equation \ref{eq:S}. This formulation also makes the connection to kernels in Gaussian processes clearer in later sections.
 
 
-\section{Bayesian Linear Regression with Basis Functions}
+\section{Bayesian linear regression with basis functions}
 
 We now transform our independent space using a set of basis function $\boldsymbol{\phi}(\mathbf{x})$ and assume that
-
 \begin{equation}
     y_\ast=f(\mathbf{x_\ast})=\boldsymbol{\theta}^\top\boldsymbol{\phi}(\mathbf{x_\ast})
 \end{equation} 
-
-Given $N_T$ training samples, $N_\ast$ test samples, and an $N_D$-dimensional basis vector, we arrive at the notation $\Phi=[\boldsymbol{\phi}(\mathbf{x}_0),\boldsymbol{\phi}(\mathbf{x}_1),\dots,\boldsymbol{\phi}(\mathbf{x}_{N_T}))]^\top$, which is a $N_T \times N_D$ matrix, and  $\boldsymbol{\phi}_\ast=\boldsymbol{\phi}(\mathbf{x}_\ast)$, which is a $N_\ast \times N_D$ matrix. This gives us the covariance function:
-
+Given $N$ training samples, $N_\ast$ test samples, and an $N_B$-dimensional basis vector, we arrive at the notation $\Phi=[\boldsymbol{\phi}(\mathbf{x}_0),\boldsymbol{\phi}(\mathbf{x}_1),\dots,\boldsymbol{\phi}(\mathbf{x}_{N}))]^\top$, which is a $N \times N_B$ matrix, and  $\boldsymbol{\phi}_\ast=\boldsymbol{\phi}(\mathbf{x}_\ast)$, which is a $N_\ast \times N_B$ matrix. This gives us the covariance function:
 \begin{equation}
-    \Sigma^{-1} = \Phi \Phi^\top + \Sigma_p
+\label{covariance_matrix}
+    \boldsymbol{\Sigma}^{-1} = \sigma^{-2} \boldsymbol{\Phi}  \boldsymbol{\Phi}^\top +  \boldsymbol{\Sigma}_p^{-1}
 \end{equation} 
+where we note that the calculation in involves matrix multiplications on the scale $N_B \times (N \times N) \times N_B + N_B \times N_B$. In other words, we perform a summation (integration or dot product) over the training data points.
 
-where we note that the calculation in involves matrix multiplications on the scale $N_D \times (N_T \times N_T) \times N_D + N_D \times N_D$. In other words, we perform a summation (dot product) over the training data points.
 Similarly,
-
 \begin{equation}
-    \boldsymbol{\theta}\sim\mathcal{N}(\Sigma \Phi^\top \mathbf{y} ,\sigma^2\Sigma)
+\label{theta_distribution}
+    \boldsymbol{\theta}\sim\mathcal{N}( \sigma^{-2}\boldsymbol{\Sigma} \boldsymbol{\Phi}^\top \mathbf{y},\boldsymbol{\Sigma})
 \end{equation} 
-
-involves matrix multiplations on the scale $N_D \times (N_D \times N_D) \times (N_T \times N_T)$ for the mean, that is, we perform a summation over the basis vector and the training data. We now have model parameters for each $N_D$ dimension in the basis functions. This gives us
-
+involves matrix multiplications on the scale $N_B \times (N_B \times N_B) \times (N \times N)$ for the mean, that is, we perform a summation over the basis vector and the training data. We now have model parameters for each $N_B$ dimension in the basis functions. This gives us
 \begin{equation}
 \label{BLR_posterior}
-    \mathbf{y_\ast}(\mathbf{x}_\ast)\sim\mathcal{N}(\boldsymbol{\phi}_\ast\Sigma \Phi^\top\mathbf{y} ,\sigma^2\boldsymbol{\phi}_\ast\Sigma\boldsymbol{\phi}_\ast^\top)
+    \mathbf{y}(\mathbf{x})\sim\mathcal{N}\left(\sigma^{-2}\boldsymbol{\Phi}  \boldsymbol{\Sigma} \boldsymbol{\Phi}^\top\mathbf{y} ,\boldsymbol{\Phi}^\top\boldsymbol{\Sigma}\boldsymbol{\Phi}+\sigma^2 \mathbf{I}_N\right)
+\end{equation} 
+and
+\begin{equation}
+\label{BLR_posterior}
+    y_\ast(\mathbf{x}_\ast)\sim\mathcal{N}\left(\sigma^{-2}\boldsymbol{\phi}_\ast  \boldsymbol{\Sigma} \boldsymbol{\Phi}^\top\mathbf{y} ,\boldsymbol{\phi}^\top_\ast \boldsymbol{\Sigma}\boldsymbol{\phi}_\ast+ \sigma^2\right)
+\end{equation} 
+with the associated matrix multiplications on the scale $N_\ast \times(N_B \times N_B) \times (N_B \times N_B) \times (N \times N)$ for the mean and $N_\ast \times (N_B \times N_B) \times (N_B \times N_B) \times N_\ast$ for the covariance. In other words, we most of our summations are over the basis dimensionality $N_B$ and some over the training set dimensionality $N$.
+
+Meanwhile, the alternative formulation gives us 
+\begin{equation}
+\label{eq:define_S}
+    \mathbf{S}^{-1} = \sigma^2\boldsymbol{\Sigma}^{-1}=\boldsymbol{\Phi \Phi}^\top + \sigma^2\mathbf{S}_p^{-1}
+\end{equation}
+\begin{equation}
+\label{theta_distribution}
+    \boldsymbol{\theta}\sim\mathcal{N}( \mathbf{S} \boldsymbol{\Phi}^\top \mathbf{y},\sigma^2\mathbf{S})
+\end{equation} 
+\begin{equation}
+\label{BLR_posterior}
+    \mathbf{y}(\mathbf{x})\sim\mathcal{N}\left(\boldsymbol{\Phi}  \mathbf{S} \boldsymbol{\Phi}^\top\mathbf{y} ,\sigma^2\left(\boldsymbol{\Phi}^\top\mathbf{S}\boldsymbol{\Phi}+\mathbf{I}_N\right)\right)
+\end{equation} 
+\begin{equation}
+\label{BLR_posterior}
+    \mathbf{y_\ast}(\mathbf{x}_\ast)\sim\mathcal{N}\left(\boldsymbol{\phi}_\ast  \mathbf{S} \boldsymbol{\Phi}^\top\mathbf{y} ,\sigma^2\left(\boldsymbol{\phi}^\top_\ast \mathbf{S}\boldsymbol{\phi}_\ast+ \mathbf{I}_{N_\ast}\right)\right)
 \end{equation} 
 
-with the associated matrix multiplications on the scale $N_\ast \times(N_D \times N_D) \times (N_D \times N_D) \times (N_T \times N_T)$ for the mean and $N_\ast \times (N_D \times N_D) \times (N_D \times N_D) \times N_\ast$ for the covariance. In other words, we most of our summations are over the basis dimensionality $N_D$ and some over the training set dimensionality $N_T$
+\section{Gaussian processes}
 
-
-\section{Gaussian Processes}
-
-The Gaussian Process (GP) is defined differently. Instead of considering a set of multi-valued basis function vectors defined for each point in independent space $\mathbf{x}$, we consider a single-valued function that takes as two points in the independent space as its arguments. This function is the kernel $k(\mathbf{x},\mathbf{x}')$ which can be extrapolated to multiple observations at once as the matrix $K(X,X')$. We thus draw the the associated observations in the dependent space $\mathbf{y}$ according to the normal distribution using the prior distribution:
-
+The Gaussian Process (GP) is defined differently. Instead of considering a set of multi-valued basis function vectors defined for each point in independent space $\mathbf{x}$, we consider a single-valued function that takes as two points in the independent space as its arguments. This function is the kernel $k(\mathbf{x},\mathbf{x}')$ which can be extrapolated to multiple observations at once as the matrix $\mathbf{K}(\mathbf{X},\mathbf{X}')$. We thus draw the associated observations in the dependent space $\mathbf{y}$ according to the normal distribution using the prior distribution:
 \begin{equation}
     \begin{bmatrix}
     \mathbf{y} \\
     \mathbf{y_\ast}
-    \end{bmatrix} =
+    \end{bmatrix} \sim
     \mathcal{N}\left(\mathbf{0},
     \begin{bmatrix}
-    K(X,X) & K(X,X_\ast) \\
-    K(X_\ast,X) & K(X_\ast,X_\ast)
+    \mathbf{K}(\mathbf{X},\mathbf{X}) & \mathbf{K}(\mathbf{X},\mathbf{X}_\ast) \\
+    \mathbf{K}(\mathbf{X}_\ast,\mathbf{X}) & \mathbf{K}(\mathbf{X}_\ast,\mathbf{X}_\ast)
     \end{bmatrix}\right)
 \end{equation} 
 
 Let us simplify this notation a bit:
-
 \begin{equation}
     \begin{bmatrix}
     \mathbf{y} \\
     \mathbf{y_\ast}
-    \end{bmatrix} =
+    \end{bmatrix} \sim
     \mathcal{N}\left(\mathbf{0},
     \begin{bmatrix}
-    K & K_\ast \\
-    K^\top_\ast & K_{\ast\ast}
+    \mathbf{K} & \mathbf{K}_\ast \\
+    \mathbf{K}^\top_\ast & \mathbf{K}_{\ast\ast}
     \end{bmatrix}\right)
 \end{equation} 
-
-This is a distribution over the observations and the new test points (denoted with the asterisk) jointly. What does it looks like from the new test point's perspective after we account for the observations?  Then we have the posterior distribution:
-
+This is a distribution over the observations and the new test points (denoted with the asterisk) jointly. What does it looks like from the new test point's perspective after we account for the observations?  We can solve this using Section 4.3.4 and Equation 4.69 in \cite{murphy}, obtaining the posterior distribution:
 \begin{equation}
 \label{GP_posterior}
-\mathbf{y}_\ast\sim\mathcal{N}\left(K_\ast^\top K^{-1}\mathbf{y},K_{\ast\ast}-K_\ast^\top K^{-1}K_\ast \right)
+\mathbf{y}_\ast\sim\mathcal{N}\left(\mathbf{K}_\ast^\top \mathbf{K}^{-1}\mathbf{y},\mathbf{K}_{\ast\ast}-\mathbf{K}_\ast^\top \mathbf{K}^{-1}\mathbf{K}_\ast \right)
 \end{equation}
 
-These calculations require summations in the matrix multiplication at the scale of $N_\ast \times (N_T \times N_T) \times (N_T \times N_T)$ for hte mean and $N_ast \times (N_T \times N_T) \times (N_T \times N_T) \times N_\ast$ for the covariance. In this case, all summations are over the training set dimensionality $N_T$. This the essence of the "kernel trick".
-
-\section{Equating the Bayesian Linear Regression with the Gaussian Process for a Squared-Exponential Kernel}
-
-We can choose any kernel we like for our Gaussian Process prior, and these can be created by performing operations on other kernels, too. We consider the common case of 
-
-\begin{equation}
-\label{kernel}
-    k_\text{GP}(\mathbf{x},\mathbf{x}') = \exp\left(\frac{(\mathbf{x}'-\mathbf{x})^2}{2l^2}\right) + \sigma_n^2 \delta(\mathbf{x}, \mathbf{x}')
-\end{equation}
-
-which is a squared-exponential kernel with white noise added for the variation we expect in repeated measurements at the same point. Note that $l$ defines a length scale for the kernel.
-Using the identity 
-
-\begin{equation}
-    \int_{-\infty}^{\infty}e^{-a x^2 + b x + c}dx = \sqrt{\frac{\pi}{a}}e^{\frac{b^2}{4a}+c}
-\end{equation}
-
-we observe that 
-
-\begin{equation}
-    \int_{-\infty}^{\infty}\exp\left(\frac{(x_0-x''_0)^2)}{2l^2}\right)\exp\left(\frac{(x'_0-x''_0)^2)}{2l^2}\right)dx''\propto\exp\left(\frac{x_0-x'_0}{4l^2}\right)
-\end{equation}
-
-That is, if we perform an inner product over all possible $x''$s for a basis function defined by a kernel with length scale $l$ at points $x$ and $x'$, this is equivalent to computing a different kernel between $x$ and $x''$. In the case of the squared-exponentianl (gaussian) kernel, the new equivalent kernel has the same form with a length scale that is $\sqrt{2}$ larger.
-
-Looking back at Equations \ref{BLR_posterior} and \ref{GP_posterior}, we can make the following correspondences for the means
-
-\begin{equation}
-    \text{mean}(\mathbf{y}_\ast)\sim\boldsymbol{\phi}_\ast \Sigma \Phi^\top \mathbf{y} \sim K_\ast^\top K^{-1} \mathbf{y}
-\end{equation}
-
-and the covariances
-
-\begin{equation}
-   \text{cov}(\mathbf{y}_\ast) \sim \sigma_n^2\boldsymbol{\phi}_\ast\Sigma\boldsymbol{\phi}_\ast^\top \sim K_{\ast\ast} - K_\ast^\top K^{-1} K_\ast
-\end{equation}
-
-The corresponding expressions certainly look similar, but there are noticeable differences. It begs the question, what if there were some kernel $k_\text{BLR}(\mathbf{x},\mathbf{x}')$ that could define a basis set 
-
-\begin{equation}
-    \boldsymbol{\phi}(\mathbf{x})=C_N(k_\text{BLR}(\mathbf{x},\mathbf{x_0}),k_\text{BLR}(\mathbf{x},\mathbf{x_1}),\dots,k_\text{BLR}(\mathbf{x},\mathbf{x}_{N_D}))
-\end{equation}
-
-with a normalization constant $C_N$ such that the above correspondences could become identities? Note that we also restrict this kernel so that 
-
-\begin{equation}
-    C_N^{-1} = \boldsymbol{\phi}^\top(\mathbf{x})\boldsymbol{\phi}(\mathbf{x}) = 1
-\end{equation}
-
-
-Let us set our prior covariance for the Bayesian linear regression to
-
-\begin{equation}
-    \Sigma_p=\sigma_n^2 I
-\end{equation}
-
-that is, we assume our prior weights have a mean of zero, are uncorrelated, and have a spread in their means identical to the noise of the data we will soon ingest. Let us also set 
-
-\begin{equation}
-    k_\text{BLR}(x_0,x'_0)=\exp\left(\frac{x_0-x'_0}{4l^2}\right)
-\end{equation}
-
-What we will arrive at is a Bayesian linear regression that produces the same predictions as the Gaussian process regression with kernel
-
-\begin{equation}
-    k_\text{GP}(x_0,x'_0)=\exp\left(\frac{x_0-x'_0}{2l^2}\right)
-\end{equation}
-
-because the normalization constants will balance each other out, and the model will learn new coefficients for each basis dimension that account for whatever constants haven't been figured out.
-
-Note that in this case, the posterior covariance isn't proportional to $k_\text{GP}$ for the same reason that it isn't proportional to $K_{\ast\ast}$ in Equation \ref{GP_posterior} or $\Sigma_p^{-1}$ in Equation \ref{BLR_posterior}. Rather, if we describe the posterior covariance as a pure kernel function, it would look something like 
-
-\begin{equation}
-    \text{cov}(\mathbf{y_\ast})= k_\text{post.}(\mathbf{x}_\ast,\mathbf{x}_\ast) =
-    k_\text{equiv.}(\mathbf{x}_\ast,\mathbf{x}) k_\text{equiv.}^\top(\mathbf{x}_\ast,\mathbf{x})
-\end{equation}
-\begin{equation}
-    k_\text{equiv.} = C_N\sigma_n\Sigma^{1/2}k_\text{BLR}^\top(\mathbf{x}_\ast,\mathbf{x})
-\end{equation}
-
-which means that inferencing on the posterior mixes up the basis functions defined by $k_\text{BLR}$ according to the operator $\Sigma^{1/2}$, which is defined by performing a summation over the training points (just like with a Gaussian process). What's a little weird about this equation is that it implies our covariance matrix would see its exponents divide by two due to the square root, but because of the identity in Equation 14, it actually multiplies by two. For examples of this basis function set, see Figure \ref{fig:basis}.
-
-\section{Equating the Bayesian Linear Regression with the Gaussian Process for Arbitrary Kernels}
-
-The previous section covered how to accomplish the equivalence between the Bayesian linear regression and the Gaussian process for a squared-exponential kernel for the GP. One take-away was that the equivalent basis in the BLR has a different length scale and prefactor, but since we can just normalize out the prefactosr, all that matters is the different length scale. The other main take-away is that we can use any arbitrary combination of our basis set and the BLR will learn new coefficients to account for that transformation, as evidenced in Equation 24.
-
-The drawback with the previous approach was that, while intuitive, it leaves us in the dark for performing this equivalence for arbitrary kernels. However, we can use the fact that we can use any linear combination of basis functions to achieve the same result. If that's the case, then let's eschew the manual integration and instead define our basis as the eigenvectors of the kernel used in the GP evaluated at the same basis centers used in the previous analysis.
-
-We first calculate our eigenvectors (rows of $V$) and eigenvalues (diagonal elements of $D$) as follows:
-
-\begin{equation}
-    VDV^\top = 
-    \begin{bmatrix}
-    k_\text{GP}(\mathbf{x}_0,\mathbf{x}_0) && k_\text{GP}(\mathbf{x}_0,\mathbf{x}_1) && \dots && k_\text{GP}(\mathbf{x}_0,\mathbf{x}_{N_D}) \\
-    k_\text{GP}(\mathbf{x}_1,\mathbf{x}_0) && k_\text{GP}(\mathbf{x}_1,\mathbf{x}_1) && \dots && k_\text{GP}(\mathbf{x}_1,\mathbf{x}_{N_D}) \\
-    \vdots && \vdots && \ddots && \vdots \\
-    k_\text{GP}(\mathbf{x}_{N_D},\mathbf{x}_0) && k_\text{GP}(\mathbf{x}_{N_D},\mathbf{x}_1) && \dots && k_\text{GP}(\mathbf{x}_{N_D},\mathbf{x}_{N_D}) \\
-    \end{bmatrix}
-\end{equation}
-
-note that while appearing similar, the right-hand side of Equation 25 is not the same as $K$, which is the kernel evaluated between all training points, but rather the kernel evaluated between all basis centers.
-
-To project our observations into this space, we convolve them with an normalized infinitesimal-width Gaussian kernel, that is, a dirac delta function ($\delta$), but for computational purposes we choose a width that is sufficiently small that it is less than the distance between any two data points to avoid numerical errors. We can perform this projections as follows: 
-
-\begin{equation}
-    X_\delta =
-    \begin{bmatrix}
-    \delta(\mathbf{x}_0,\mathbf{x}_0) && \delta(\mathbf{x}_0,\mathbf{x}_1) && \dots && \delta(\mathbf{x}_0,\mathbf{x}_{N_D}) \\
-    \delta(\mathbf{x}_1,\mathbf{x}_0) && \delta(\mathbf{x}_1,\mathbf{x}_1) && \dots && \delta(\mathbf{x}_1,\mathbf{x}_{N_D}) \\
-    \vdots && \vdots && \ddots && \vdots \\
-    \delta(\mathbf{x}_{N_T},\mathbf{x}_0) && \delta(\mathbf{x}_{N_T},\mathbf{x}_1) && \dots && \delta(\mathbf{x}_{N_T},\mathbf{x}_{N_D}) \\
-    \end{bmatrix}
-\end{equation}
-
-and then project onto the eigenbasis:
-
-\begin{equation}
-    \Phi = X_\delta V
-\end{equation}
-
-and similarly for our test data points at $X_\ast$. We then perform the same procedure as for Bayesian linear regression (Equation \ref{BLR_posterior}). For examples of this basis function set, see Figure \ref{fig:basis}.
+These calculations require summations in the matrix multiplication at the scale of $N_\ast \times (N \times N) \times (N \times N)$ for the mean and $N_ast \times (N \times N) \times (N \times N) \times N_\ast$ for the covariance. In this case, all summations are over the training set dimensionality $N$. This the essence of the "kernel trick". An example Gaussian process regression can be seen in Figure \ref{fig:example_regression}.
 
 \begin{figure}
     \begin{center}
-    \includegraphics[width=0.75\linewidth]{manualbasis}
-    \includegraphics[width=0.75\linewidth]{eigenbasis}
-    \caption{Top: The manual basis functions, which are length-scale-adjusted Gaussian distributions, centered at 0\%, 10\%, 20\%, and 30\% along the domain. Bottom: The eigenbasis functions $V$ for the largest four eigenvalues. Note that the sign of each function is arbitrary (can be flipped over the x-axis), and that these functions are the harmonic modes for an equivalent one-dimensional string with fixed endpoints}
-    \label{fig:basis}
+    \includegraphics[width=0.75\linewidth]{regression_results}
+    \includegraphics[width=0.75\linewidth]{regression_results2}
+    \caption{Regression results for all three approaches for an objective function that is a sine wave. Top: with wavelength set to 0.2, a Gaussian kernel with length scale set to 0.5, the noise parameter set to 0.1, with 1000 basis centers spread across a domain from -2 to 3, and 50 training data points spread equidistantly over a domain from 0 to 1. Bottom: with wavelength set to 1, length scale set to 0.1, noise parameter set to 0.01, with 1000 basis centers spread across a domain from -5 to 5, and 5 training data points spread equidistantly over a domain from 0 to 1. This figure was created with the associated code on Github.}
+    \label{fig:example_regression}
     \end{center}
 \end{figure}
 
-We can perform a couple of simplifications to the procedure outlined in the previous section by considering two ways to reduce the computational complexity: (1) reduce the number of basis centers so that they are spaced according to the length scales of the original kernel and (2) reduce the number of eigenvectors (by filtering out those with small eigenvalues). The first works exceedingly well, except when the variation in the training set y-values is greater than can be afforded by the length scale of the kernel. A GP or equivalent BLR will fit more closely to these widely-varying observations than one with a sparser basis set. Similarly, the second approach loses spatial resolution in proportion to how many eigenvectors are discarded.
+\section{Equating the Bayesian linear regression with the Gaussian process for a squared-exponential kernel}
 
-Note that just as is the case with the manually-derived basis functions, the BLR will only produce equivalent predictions within the domain that the basis functions cover.
+We aim to find set of basis functions that relate to the Gaussian process prior kernel according to 
+\begin{equation}
+\label{GP_prior}
+     k_\text{prior}(\mathbf{x},\mathbf{x}')=k_\text{GP}(\mathbf{x},\mathbf{x}') = \phi^\top(\mathbf{x})\phi(\mathbf{x}) = \sum_{i=1}^{N_B}k_\text{BLR}(\mathbf{x},\mathbf{x}''_i)k_\text{BLR}(\mathbf{x'},\mathbf{x}''_i)
+\end{equation}
+\begin{equation}
+\label{define_K}
+     \mathbf{K}=k_{\text{GP}}(\mathbf{X},\mathbf{X}) = \boldsymbol{\Phi}^\top \boldsymbol{\Phi} + \sigma^2 \mathbf{I}_N
+\end{equation}
+where $N_B$ is the number of basis dimensions. Note that while Equation \ref{define_K} resembles Equation \ref{eq:define_S}, the definition for $\mathbf{K}$ uses the inner product, while the definition of $\mathbf{S}$ uses the outer product.  
+
+According to the reproducing kernel Hilbert space (RKHS) theory, there is one set of $\psi$ that will accomplish this goal, but what is it? We consider the common case of 
+\begin{equation}
+\label{kernel}
+    k_\text{GP}(\mathbf{x},\mathbf{x}') = \exp\left(\frac{(\mathbf{x}'-\mathbf{x})^2}{2l^2}\right) + \sigma^2 \delta(\mathbf{x}, \mathbf{x}')
+\end{equation}
+which is a squared-exponential kernel with white noise added for the variation we expect in repeated measurements at the same point. Note that $l$ defines a length scale for the kernel.
+
+Using the identity 
+\begin{equation}
+\label{gaussian_integral_identity}
+    \int_{-\infty}^{\infty}e^{-a x^2 + b x + c}dx = \sqrt{\frac{\pi}{a}}e^{\frac{b^2}{4a}+c}
+\end{equation}
+we observe that 
+\begin{equation}
+    \int_{-\infty}^{\infty}\exp\left(\frac{(x_0-x''_0)^2)}{2l^2}\right)\exp\left(\frac{(x'_0-x''_0)^2)}{2l^2}\right)dx''\propto\exp\left(\frac{x_0-x'_0}{4l^2}\right)
+\end{equation}.
+That is, if we perform an inner product over all possible $\mathbf{x}''$s for a basis function defined by a kernel with length scale $l$ at points $\mathbf{x}$ and $\mathbf{x}'$, this is equivalent to computing a different kernel between $x$ and $\mathbf{x}''$. To create a basis function set that will return a Gaussian kernel with length scale $l$, the kernel we use to generate that basis function set has the same form but with a length scale proportional to  $l/\sqrt{2}$.
+
+Looking back at Equations \ref{BLR_posterior} and \ref{GP_posterior}, we can make the following correspondences for the means
+\begin{equation}
+    \overline{\mathbf{y}_\ast}\sim\sigma^{-2}\boldsymbol{\phi}_\ast \boldsymbol{\Sigma} \boldsymbol{\Phi}^\top \mathbf{y} \sim \mathbf{K}_\ast^\top \mathbf{K}^{-1} \mathbf{y}
+\end{equation}
+and the covariances
+\begin{equation}
+   \text{cov}(\mathbf{y}_\ast) \sim \boldsymbol{\phi}_\ast\boldsymbol{\Sigma}\boldsymbol{\phi}_\ast^\top +\sigma^2 \mathbf{I}_{N_\ast}\sim \mathbf{K}_{\ast\ast} - \mathbf{K}_\ast^\top \mathbf{K}^{-1} \mathbf{K}_\ast
+\end{equation}.
+
+The corresponding expressions certainly look similar, but there are noticeable differences. Moreover, they involve matrix multiplications on totally different dimensions: over the training data for GPs, over the basis dimensions for BLRs. It begs the question, what if there were some kernel $k_\text{BLR}(\mathbf{x},\mathbf{x}')$ that could define a basis set 
+\begin{equation}
+    \boldsymbol{\phi}(\mathbf{x})=C(k_\text{BLR}(\mathbf{x},\mathbf{x_0}),k_\text{BLR}(\mathbf{x},\mathbf{x_1}),\dots,k_\text{BLR}(\mathbf{x},\mathbf{x}_{N_B}))
+\end{equation}with a normalization constant $C$ such that the above correspondences could become identities? Note that we also restrict this kernel so that 
+\begin{equation}
+\label{eq:normalization}
+    C^{-1} = \boldsymbol{\phi}^\top(\mathbf{x})\boldsymbol{\phi}(\mathbf{x}) = 1
+\end{equation}Let us set our prior covariance for the Bayesian linear regression to
+\begin{equation}
+\begin{split}
+   \boldsymbol{\Sigma}_p= \mathbf{I}\\\sigma_p=1
+   \end{split}
+\end{equation}that is, we assume our prior weights have a mean of zero, are uncorrelated, and have a spread in their means equal to unity.  At first, setting the spread to unity may seem arbitrary, but remember that the weights correspond to basis functions rather than raw observations, and these basis functions are normalized by Equation \ref{eq:normalization}. 
+Let us also set 
+\begin{equation}
+    k_\text{BLR}(x_0,x'_0)=\exp\left(\frac{x_0-x'_0}{4l^2}\right)
+\end{equation}What we will arrive at is a Bayesian linear regression that produces the same predictions as the Gaussian process regression with kernel
+\begin{equation}
+    k_\text{GP}(x_0,x'_0)=\exp\left(\frac{x_0-x'_0}{2l^2}\right)
+\end{equation}because the normalization constants will balance each other out, and the model will learn new coefficients for each basis dimension that account for whatever constants haven't been figured out.
+
+Note that in this case, the posterior covariance isn't proportional to $k_\text{GP}$ for the same reason that it isn't proportional to $K_{\ast\ast}$ in Equation \ref{GP_posterior} or $\Sigma_p^{-1}$ in Equation \ref{BLR_posterior}. Rather, if we describe the posterior covariance as a pure kernel function, it would look something like 
+\begin{equation}
+    \text{cov}(\mathbf{y_\ast})= k_\text{post.}(\mathbf{x}_\ast,\mathbf{x}_\ast) =
+    k_\text{equiv.}(\mathbf{x}_\ast,\mathbf{x}) k_\text{equiv.}^\top(\mathbf{x}_\ast,\mathbf{x})
+\end{equation}\begin{equation}
+\label{equivalen_kernel}
+    k_\text{equiv.} = C\sigma\boldsymbol{\Sigma}^{1/2}k_\text{BLR}^\top(\mathbf{x}_\ast,\mathbf{x})
+\end{equation}which means that inferencing on the posterior mixes up the basis functions defined by $k_\text{BLR}$ according to the operator $\boldsymbol{\Sigma}^{1/2}$, which is defined by performing a summation over the training points (just like with a Gaussian process).  For examples of this basis function set, see Figure \ref{fig:basis_large_width}.
+
+What's a little weird about this equation is that it implies our covariance matrix would see its exponents divide by two due to the square root, but because of the identity of integrating over the product of two Gaussians in Equation \ref{gaussian_integral_identity}, it actually multiplies by two. Similarly, in Section \ref{sec:hyperparameter_tuning}, the derivation for computing the log marginal likelihood of the BLR (Equation \ref{eq:log_likelihood_BLR}) requires integrating over the product of two multivariate norms. The result inverts its proportionality with the determinant of the covariance matrix compared to either of the original multivariate norms.
+
+\section{Equating the Bayesian linear regression with the Gaussian process for arbitrary kernels}
+
+The previous section covered how to accomplish the equivalence between the Bayesian linear regression and the Gaussian process for a squared-exponential kernel for the GP. One take-away was that the equivalent basis in the BLR has a different length scale and prefactor, but since we can just normalize out prefactors, all that matters is the difference in length scales between the two formulations. The other main take-away is that we can use any arbitrary combination of our basis set and the BLR will learn new coefficients to account for that transformation, as evidenced in Equation \ref{equivalen_kernel}.
+
+The drawback with the previous approach was that, while intuitive, it leaves us in the dark for performing this equivalence for arbitrary kernels. However, we can use the fact that we can use any linear combination of basis functions to achieve the same result. If that's the case, then let's eschew the manual integration and instead define our basis as the eigenvectors of the kernel used in the GP evaluated at the same basis centers used in the previous analysis.
+
+We first calculate our eigenvectors (rows of $V$) and eigenvalues (diagonal elements of $D$) of the kernel without the noise parameter for an arbitrary set of points in the independent space $X'$ as follows:
+\begin{equation}
+ \mathbf{VDV}^\top=k_\text{GP}(\mathbf{X}',\mathbf{X}')-\sigma^2 \mathbf{I}=\mathbf{K}'-\sigma^2 \mathbf{I}_{N'}
+\end{equation}giving us\begin{equation}
+\begin{split}
+\label{VDV}
+    &\mathbf{VDV}^\top+\sigma^2 \mathbf{I} \\&= 
+    \begin{bmatrix}
+    k_\text{GP}(\mathbf{x}_0,\mathbf{x}_0) && k_\text{GP}(\mathbf{x}_0,\mathbf{x}_1) && \dots && k_\text{GP}(\mathbf{x}_0,\mathbf{x}_{N_B}) \\
+    k_\text{GP}(\mathbf{x}_1,\mathbf{x}_0) && k_\text{GP}(\mathbf{x}_1,\mathbf{x}_1) && \dots && k_\text{GP}(\mathbf{x}_1,\mathbf{x}_{N_B}) \\
+    \vdots && \vdots && \ddots && \vdots \\
+    k_\text{GP}(\mathbf{x}_{N_B},\mathbf{x}_0) && k_\text{GP}(\mathbf{x}_{N_B},\mathbf{x}_1) && \dots && k_\text{GP}(\mathbf{x}_{N_B},\mathbf{x}_{N_B}) \\
+    \end{bmatrix}
+    \end{split}
+\end{equation}
+
+Note that previous equations look for the eigendecomposition of the kernel evaluated at an arbitrary set of points in independent space, omitting the white noise (diagonal entries in matrix form) but keeping the radial basis function (a Gaussian in this case) as well as the mean function $m(\mathbf{x})$ or $\mathbf{m}(\mathbf{X})$. The solution presented in this section works from these eigenvectors. To obtain a non-zero (mean) prediction far away from the data, we can either add subtract off the mean and add it back in during prediction, fit the intercept as a fixed hyperparameter, or concatenate a constant (usually 1) to the feature vectors $\boldsymbol{\phi}(\mathbf{x})$ and otherwise fit as normal. By comparison, GP practitioners either subtract off the mean or fit the mean through a constant added to every pair of points in the kernel (see Section \ref{sec:hyperparameter_tuning}. In both cases, adding the mean prediction increases the prediction variance at each point, in the BLR case due to the variance in the intercept term, and in the GP through the constant added to the kernel.
+
+\begin{figure}
+    \begin{center}
+    \includegraphics[width=0.75\linewidth]{manualbasis_large_width}
+    \includegraphics[width=0.75\linewidth]{eigenbasis_large_width}
+    \caption{Top: The manual basis functions, which are length-scale-adjusted Gaussian distributions, centered at 0\%, 10\%, 20\%, and 30\% along the domain. Bottom: The eigenbasis functions $V$ for the largest four eigenvalues. Note that the sign of each function is arbitrary (can be flipped over the x-axis), and that these functions resemble the harmonic modes for an equivalent one-dimensional thick string with fixed endpoints one length scale outside the domain of our basis centers (off-plot).}
+    \label{fig:basis_large_width}
+    \end{center}
+\end{figure}
+
+\begin{figure}
+    \begin{center}
+    \includegraphics[width=0.75\linewidth]{manualbasis_small_width}
+    \includegraphics[width=0.75\linewidth]{eigenbasis_small_width}
+    \caption{Same as Figure \ref{fig:basis_large_width}, but for a kernel with a length scale $1/10^{\text{th}}$ the size. We see that the fixed endpoints of the hypothetical string are now right at the end of the basis center domain since the length scale of the kernel is so small.}
+    \label{fig:basis_small_width}
+    \end{center}
+\end{figure}
+
+To project our observations into this space, we convolve them with an normalized infinitesimal-width Gaussian kernel, that is, a dirac delta function $\delta$, but for computational purposes we choose a finite width that is equivalent to the distance between adjacent points in our sampling of the independent space $\mathbf{X}'$. While the choice is arbitrary, it makes sense to reuse the centers  to generate our basis set, that is, to set $\mathbf{X}'=(\mathbf{x}_0,\mathbf{x}_1,\dots,\mathbf{x}_{N_B})$.
+
+We thus perform this projections as follows: 
+
+\begin{equation}
+    \mathbf{X}_\delta =
+    \begin{bmatrix}
+    \delta(\mathbf{x}_0,\mathbf{x}_0) && \delta(\mathbf{x}_0,\mathbf{x}_1) && \dots && \delta(\mathbf{x}_0,\mathbf{x}_{N_B}) \\
+    \delta(\mathbf{x}_1,\mathbf{x}_0) && \delta(\mathbf{x}_1,\mathbf{x}_1) && \dots && \delta(\mathbf{x}_1,\mathbf{x}_{N_B}) \\
+    \vdots && \vdots && \ddots && \vdots \\
+    \delta(\mathbf{x}_{N},\mathbf{x}_0) && \delta(\mathbf{x}_{N},\mathbf{x}_1) && \dots && \delta(\mathbf{x}_{N},\mathbf{x}_{N_B}) \\
+    \end{bmatrix}
+\end{equation}
+and then project onto the eigenbasis:
+\begin{equation}
+\begin{split}
+    \boldsymbol{\Phi} &= \mathbf{X}_\delta \sqrt{\mathbf{D}}\mathbf{V}\\ \boldsymbol{\Phi} \boldsymbol{\Phi}^\top&=\mathbf{VDV}^\top\\&=\mathbf{K}'-\sigma^2 \mathbf{I}_{N'}
+    \end{split}
+\end{equation}
+and similarly for our test data points at $\mathbf{X}_\ast$. We then perform the same procedure as for Bayesian linear regression (Equation \ref{BLR_posterior}). For examples of this basis function set, see Figure \ref{fig:basis_large_width}.
 
 
+What happens to the eigenbasis when we change the width of the kernel? For small length scales (see Figure \ref{fig:basis_small_width}), the eigenbasis resembles the vibrational modes of a string (in one dimension, a plane in two dimensions, etc.) bounded by the domain of the basis centers, as if the string is perfectly fixed at its endpoints like on a guitar. As the length scale grows larger, as in Figure \ref{fig:basis_large_width}, we see that the eigenbases actually taper to the edges of the basis center domain with a length scale proportional to the one used for the kernel. The best possible approximation extends the domain of basis centers to plus and minus infinity, and when we take this approach in our calculations, we find that the same intuition applies but the interpretation changes slightly. The eigenbases with the highest eigenvalues resemble sine-waves in the training data domain and the wavelengths of adjacent eigenbases increment proportionally to the kernel wavelength. Similarly, the Taylor expansion of a Gaussian involves sine and cosine waves of differing wavelengths whose differences are proportional to the Gaussian length scale.
 
+There is meaning held in the eigenvalues $\text{diag}(\mathbf{D})$. If we look at the eigenvalues for the linear system \begin{equation}\left(\sigma_p^{-2}\boldsymbol{\Phi}\boldsymbol{\Phi}^\top\right)\mathbf{u}_i=\mathbf{u}_i\end{equation} defined by $(\lambda_1,\lambda_2,\dots,\lambda_N)=\sigma_p^{-2}\text{diag}(\mathbf{D})$, by Section 3.5.3 of \cite{bishop}, we see that the quantity
+\begin{equation}
+\gamma=\sum_{i=1}^{N}\frac{\lambda_i}{\sigma_p^{-2} + \lambda_i}
+\end{equation} defines the effective number of parameters by which we can alter our noise parameter \begin{equation}\sigma_\text{unbaised}=\sigma\frac{N}{N-\gamma}\end{equation} to get the unbaised covariance matrix \begin{equation}\boldsymbol{\Sigma}_\text{unbaised}^{-1}=\sigma_\text{unbiased}^{-2}\boldsymbol{\Phi}\boldsymbol{\Phi}^\top+\boldsymbol{\Sigma}_p^{-1}\end{equation} of our model parameters $\boldsymbol{\theta}$. Note that whether we use the biased or unbiased noise parameter and covariance matrix does not affect our mean predictions, as shown in Equations \ref{eq:define_S} through \ref{BLR_posterior} , at least from the perspective where the regularization constant $\lambda=\sigma^2/\sigma_p^2$ is kept constant (not to be confused with the eigenvalues  $\lambda_i$).
+
+Note that \cite{bishop} is mostly interested in how $\gamma$ alters with $\sigma_p$, that is, how it changes with the regularization constant $\lambda$. However, we fix $\sigma_p=1$ when equating BLR with GP so we are interested in how $\gamma$ alters with our other model hyperparameters. Given the same set of training data of $N$ rows, we find that we can cause $\gamma$ to asymptotically approach $N$ with two changes: increase the number of basis functions (centers of Gaussian distributions), and/or decrease the noise parameter $\sigma$. In other words, both changes to the problem increase the ability and need of the model to resolve more information than can be offered by just a few (well-chosen) basis functions. In the regime of many data points and fewer basis functions, $\gamma$ will asymptotically approach the number of basis functions as we increase $\sigma$.
+
+We can perform a couple of simplifications to the procedure outlined in this section by considering two ways to reduce the computational complexity: (1) reduce the number of basis centers so that they are spaced according to the length scales of the original kernel and (2) reduce the number of eigenvectors (by filtering out those with small eigenvalues). The first works well, except when the variation in the training set y-values is greater than can be afforded by the length scale of the kernel. A GP or equivalent BLR will fit more closely to these widely-varying observations than one with a sparser basis set. 
+
+Similarly, the second approach loses spatial resolution in proportion to how many eigenvectors are discarded, and in our experience, we found this approach to be very prone to meaningfully changing your calculations. Note that just as is the case with the manually-derived basis functions, the BLR will only produce equivalent predictions within the domain that the basis functions are not infinitesimally small.
+
+\section{Tuning the noise parameter and kernel hyperparameters in both formalisms}\label{sec:hyperparameter_tuning}
+
+There are only a few models in common circulation that allow you to learn the parameters using explicit and deterministic update rules. Of the two most prominent, well-studied, and easy-to-implement algorithms, one is the Bayesian linear regression with a fixed prior noise parameter or L2 regularization constant, and optionally with a fixed data noise parameter (the current discussion cover the case of fixed noise parameter, \cite{KoyoteScience} covers the learned case). The other is the Gaussian process, with a fixed data noise parameter, as discussed in this document. As we have covered, both are actually parts of the same continuum between high featurization and large amounts of data.  The secret ingredient for these models is that due to their assumptions, it is possible to analytically integrate prediction 
+\begin{equation}
+    p_{\boldsymbol{\theta}}(\mathbf{y}_\ast|\mathbf{X}_\ast,\boldsymbol{\sigma}) = \int p(\mathbf{y}_\ast|\mathbf{X}_\ast,\boldsymbol{\theta})p(\boldsymbol{\theta}|\boldsymbol{\sigma})d\boldsymbol{\theta}
+\end{equation}when $p(\mathbf{y}_\ast|\mathbf{X}_\ast,\boldsymbol{\theta})$ is defined by a multivariate norm centered on a function defining the mean (and mode) and another function defining the covariance. Here, we represent the hyperparameters of the model by the vector of noise parameters $\boldsymbol{\sigma}$ which could include $\sigma$, $\sigma_p$, or both. In fact, the hyperparameters could also include the lengths scales of our kernel or basis functions, and even individual prior noise parameters for each data point. Note that the model parameters $\boldsymbol{\theta}$ are defined by the measured function values $\mathbf{f}(\mathbf{X})$ for the Gaussian process, while in the Bayesian linear regression they are the coefficients of the basis functions.  
+
+Alternatively, many models for which the prediction integral is intractable simply perform one prediction at the set of parameters $\boldsymbol{\theta}$ at the maximum a posteriori (MAP) when there is a prior $p(\boldsymbol{\theta})$, or the maximum likelihood estimate (MLE) when there is no prior or it is uniform and uninformative. In the Laplace approximation, which treats all models like they were Bayesian linear regressions, the spread in the probability mass for the model parameters around the MAP or MLE is modeled as a multivariate Gaussian whose covariance matrix is related to the Fisher information matrix. This allows us to end up with a tractable prediction integral again.
+
+The posterior distribution for our targets is provided by  \begin{equation} p(\mathbf{y}|\mathbf{X}, \boldsymbol{\theta})=\frac{p(\boldsymbol{\theta}|\mathbf{X},\mathbf{y})p(\mathbf{y})}{p_\mathbf{y}(\boldsymbol{\theta}|\mathbf{X})}\end{equation}or equivalently \begin{equation} p(\mathbf{y}|\mathbf{X}, \boldsymbol{\theta},\boldsymbol{\sigma})=\frac{p(\boldsymbol{\theta}|\mathbf{X},\mathbf{y},\boldsymbol{\sigma})p(\mathbf{y}|\boldsymbol{\sigma})}{p_\mathbf{y}(\boldsymbol{\theta}|\mathbf{X},\boldsymbol{\sigma})}\end{equation}and the inverse relationship is
+\begin{equation}    p(\boldsymbol{\theta}|\mathbf{X},\mathbf{y},\boldsymbol{\sigma})=\frac{p(\mathbf{y}|\mathbf{X},\boldsymbol{\theta},\boldsymbol{\sigma})p(\boldsymbol{\theta}|\boldsymbol{\sigma})}{p_{\boldsymbol{\theta}}(\mathbf{y}|\mathbf{X},\boldsymbol{\sigma})}
+\end{equation}where
+\begin{equation}
+\label{eq:define_marginal_likelihood}
+  p_{\boldsymbol{\theta}}(\mathbf{y}|\mathbf{X},\boldsymbol{\sigma})=\int p(\mathbf{y}|\mathbf{X},\boldsymbol{\theta})p(\boldsymbol{\theta}|\boldsymbol{\sigma})d\boldsymbol{\theta}
+\end{equation}is the normalization factor, marginal likelihood, or the model evidence from Bayes' theorem (posterior = likelihood $\times$ prior / evidence). Since we are usually interested in maximizing the posterior with respect to $\mathbf{y}$ or $\boldsymbol{\theta}$, we usually ignore the denominators in the above equations, unless we decide to also optimize our hyperparameters, which we will now discuss.
+
+We can consider this model to be hierarchical -- first we set the model hyperparameters $\boldsymbol{\sigma}$, giving us our prior distribution  over the model parameters $\boldsymbol{\theta}$, and then we compute our posteriors. While we expect our model to learn its parameters, we may also want a model to learn the hyperparameters. This requires us to go up one level in the hierarchy, where we look at the posterior distribution of our hyperparameters
+
+\begin{equation}
+\label{eq:posterior_sigma}
+    p_{\boldsymbol{\theta}}(\boldsymbol{\sigma}|\mathbf{X},\mathbf{y})=\frac{p_\boldsymbol{\theta}(\mathbf{y}|\mathbf{X},\boldsymbol{\sigma})p(\boldsymbol{\sigma})}{p_{\boldsymbol{\sigma}}(\mathbf{y}|\mathbf{X})}
+\end{equation}where
+\begin{equation}
+\label{eq:marginal_marginal_likelihood}
+   p_{\boldsymbol{\sigma}}(\mathbf{y}|\mathbf{X})=\int p(\mathbf{y}|\mathbf{X},\boldsymbol{\sigma})p(\boldsymbol{\sigma})d\boldsymbol{\sigma}
+\end{equation}and the inverse relationship (which we don't use) is 
+
+\begin{equation}
+    p_{\boldsymbol{\theta}}(\mathbf{y}|\mathbf{X},\boldsymbol{\sigma})=\frac{p_\boldsymbol{\theta}(\boldsymbol{\sigma}|\mathbf{X},\mathbf{y})p(\mathbf{y})}{p_{\mathbf{y}}(\boldsymbol{\sigma}|\mathbf{X})}
+\end{equation}
+That is, the MAP or MLE of the hyperparameters will occur when we maximize the marginal likelihood in Equation \ref{eq:define_marginal_likelihood}, which is also known as the evidence of the model itself when we integrate over the parameters.
+
+The above discussion leaves you to wonder that, since there is uncertainty in your hyperparameters when we don't fix them in advance and instead fit them along with the model parameters, how their uncertainty would add to the uncertainty of your predictions. Since Equation \ref{eq:marginal_marginal_likelihood} is generally intractable, we use the Type-II maximum likelihood estimation, or empirical Bayes approximation, whereby we keep our hyperparameters fixed for several different guesses and then learn the MLE of the influenced parameters, and maximize with respect to the hyperparameters we explore over. If we are comfortable with using the MAP or MLE for our mean and the Laplace approximation (defining the spread in hyperparamters by the Fisher information matrix or local curvature), we can stop here. A well-thought out discussion of why we should be satisfied with this approximation can be found in \cite{MacKay99}.
+
+Using Equation \ref{eq:posterior_sigma}, we can compare two models with hyperparameters $\boldsymbol{\sigma}_1$ and $\boldsymbol{\sigma}_2$, 
+\begin{equation}\frac{p(\boldsymbol{\sigma}_1|\mathbf{X},\mathbf{y})}{p(\boldsymbol{\sigma}_2|\mathbf{X},\mathbf{y})}=\overbrace{\frac{p_{\boldsymbol{\theta}}(\mathbf{y}|\mathbf{X},\boldsymbol{\sigma}_1)}{p_{\boldsymbol{\theta}}(\mathbf{y}|\mathbf{X},\boldsymbol{\sigma}_2)}}^\text{Bayes' factor}\frac{p(\boldsymbol{\sigma}_1)}{p(\boldsymbol{\sigma}_2)}\end{equation}giving us Bayes' factors (used in the Bayesian information criterion, or BIC). This tells us that we can compare them using their marginal likelihoods without having to perform the nasty integrals from the denominator, assuming that the prior distributions of the hyperparameters are identical.
+
+We compute the marginal likelihood by integrating the product of the multivariate normal likelihood distribution dependent on $\mathbf{X},\mathbf{y},\boldsymbol{\theta},\boldsymbol{\Sigma}, \sigma$, and the prior multivariate normal prior distribution of the parameters dependent on $\sigma_p$, over the model parameters $\boldsymbol{\theta}$. Meanwhile, the normalized multivariate distribution $\mathbf{y}|\mathbf{X} \sim \mathcal{N}(\mathbf{y}|\mathbf{m},\boldsymbol{\Sigma}_f)$ is given by
+\begin{equation}
+\begin{split}
+    \mathcal{N}(\mathbf{y}|\mathbf{m},\boldsymbol{\Sigma}_f)& =\frac{1}{\sqrt{(2\pi)^N |\boldsymbol{\Sigma}_f|}} \exp \left(-\frac{1}{2}(\mathbf{y}-\mathbf{m})^\top\boldsymbol{\Sigma}_f^{-1}(\mathbf{y}-\mathbf{m})\right) \\
+   \log p(\mathbf{y}|\mathbf{X})& = -\frac{1}{2}(\mathbf{y}-\mathbf{m})^\top\boldsymbol{\Sigma}_f^{-1}(\mathbf{y}-\mathbf{m})-\frac{1}{2}\log |\boldsymbol{\Sigma}_f|-\frac{N}{2}\log 2\pi
+   \end{split}
+\end{equation} We  thus express our marginal likelihood as
+\begin{equation}
+\begin{split}
+    p_{\boldsymbol{\theta}}(\mathbf{y}|\mathbf{X},\boldsymbol{\sigma})&=\int p(\mathbf{y}|\mathbf{X},\boldsymbol{\theta})p(\boldsymbol{\theta}|\boldsymbol{\sigma})d\boldsymbol{\theta} \\
+    &= \int \mathcal{N}(\mathbf{y}|\boldsymbol{\Phi}\boldsymbol{\theta},\sigma^2\mathbf{I}_N)\mathcal{N}(\boldsymbol{\theta}|\mathbf{0}_{N_B},\sigma^2\mathbf{I}_{N_B})d\boldsymbol{\theta}
+    \end{split}
+\end{equation}After completing the squares on the two squared exponentials and normalizing\footnote{Similarly, you can evaluate the integral from Equation 3.77 using Equation 2.115 in Exercise 3.16 from \cite{bishop}. Bishop's book doesn't cover the derivation, but you can find solutions for Exercise 3.16 online. A detailed and satisfying derivation can also be found at \href{ http://www.utstat.utoronto.ca/~radford/sta414.S11/week4a.pdf}{\texttt{http://www.utstat.utoronto.ca/~radford/sta414.S11/week4a.pdf}}}, we arrive a Equation 3.86 from \cite{bishop}: 
+\begin{equation}
+\label{eq:log_likelihood_BLR}
+\begin{split}
+    &\log p_{\boldsymbol{\theta}}(\mathbf{y}|\sigma_p, \sigma) \\=&- \frac{1}{2\sigma^2}\left(||\mathbf{y}-\boldsymbol{\Phi}\overline{\boldsymbol{\theta}}||^2 + \frac{\sigma^2}{\sigma_p^2}\overline{\boldsymbol{\theta}}^\top\overline{\boldsymbol{\theta}}\right) \\&-\frac{1}{2}\left( \log|\boldsymbol{\Sigma}^{-1}|+2 N \log \sigma\right)\\&-\frac{N}{2}\log 2\pi \\& -N_B \log \sigma_p 
+    \end{split}
+\end{equation}Note that the data term $- \frac{1}{2\sigma^2}||\mathbf{y}-\boldsymbol{\Phi}\overline{\boldsymbol{\theta}}||^2 $ becomes a constant ($-\frac{1}{2}$) if we learn $\sigma$ from the residuals, and that we are expressing our solution in terms of the mean (learned) model parameters $\overline{\boldsymbol{\theta}}=\sigma^{-2}\boldsymbol{\Sigma}\boldsymbol{\Phi}^\top$ from Equation \ref{theta_distribution}.
+
+For the Gaussian process, we also obtain the log marginal likelihood through integration over two Gaussians. In this case, however, we integrate over the measured input data $\mathbf{f}(\mathbf{X})$, instead of a set of explicit model parameters $\boldsymbol{\theta}$, so that
+\begin{equation}
+\begin{split}
+    p_{\mathbf{f}}(\mathbf{y}|\mathbf{X},\boldsymbol{\sigma})&=\int p(\mathbf{y}|\mathbf{X},\mathbf{f})p(\mathbf{f}|\mathbf{X},\boldsymbol{\sigma})d\mathbf{f} \\
+    &= \int \mathcal{N}(\mathbf{y}|\mathbf{f},\sigma^2\mathbf{I}_N)\mathcal{N}(\mathbf{f}|\mathbf{0}_{N},\mathbf{K}_\text{RBF})d\mathbf{f}
+    \end{split}
+\end{equation}Using the identity in Equation A.7 from \cite{rasmussen} with the values
+\begin{equation}
+\begin{split}
+    \mathbf{a} &= \mathbf{f} \\
+    \mathbf{A} &= \sigma^2\mathbf{I}_N \\
+    \mathbf{b} &= \mathbf{0}_N \\
+    \mathbf{B} &= \mathbf{K}_\text{RBF}
+\end{split}
+\end{equation}and noting that $\mathcal{N}(\mathbf{x}|\mathbf{y},\boldsymbol{\Sigma}_f)=\mathcal{N}(\mathbf{y}|\mathbf{x},\boldsymbol{\Sigma}_f)$, we arrive at Equations 2.30 and 5.8 in \cite{rasmussen}:
+\begin{equation}
+    \log p(\mathbf{y}|\mathbf{X},\mathbf{K}_\text{RBF}) = -\frac{1}{2}\left((\mathbf{y}-\overline{\mathbf{f}})^\top \mathbf{K}^{-1} (\mathbf{y}-\overline{\mathbf{f}}) \right) - \frac{1}{2}\log|\mathbf{K}| - \frac{N}{2}\log 2\pi
+\end{equation}where the vertical bars represent the determinant operator and $\mathbf{K}=\mathbf{K}_\text{RBF}+\sigma^2 \mathbf{I}_N$. Note that the term $\overline{\mathbf{f}}$ is the mean function of the GP (that is, the mean of our measured input data targets, or the intercept in BLR) replicated for every point in $\mathbf{X}$. We can make $\overline{\mathbf{f}}$ non-zero by adding a constant between every pair of points to the kernel $\mathbf{K}_\text{RBF}$.
+
+Given these likelihoods, you can also optimize the noise parameter and length scales of the equivalent BLR the same way that is canon with GPs: you perform multiple gradient descents in the negative log marginal likelihood, since the landscape is pretty smooth, although not convex, and therefore may have multiple local minima. Note that it's also possible to compute the noise parameter along with the model parameters in the Bayesian linear regression formalism\cite{KoyoteScience}, leaving only the kernel hyperparameters to tune.
+
+Diving in more deeply, we see that the first terms, which represent the data fit, are equivalent:
+\begin{equation}
+    \sigma^{-2}||\mathbf{y}-\overline{\boldsymbol{\theta}} ^\top \Phi ||^2 +\sigma_p^{-2} \overline{\boldsymbol{\theta}}^\top\overline{\boldsymbol{\theta}} = \mathbf{y}^\top \mathbf{K}^{-1} \mathbf{y} 
+\end{equation}and at first it may seem surprising to include the regularization term proportional to $\overline{\boldsymbol{\theta}}^\top\overline{\boldsymbol{\theta}}$ in this equation. Keep in mind that the regularization term is enforced in the BLR by the prior with uncorrelated weights with a spread equivalent to a pre-defined noise parameter $\sigma_p$, and while the regularization is enforced in the GP by the prior kernel which includes the noise parameter in its white noise component, that is, it is the sum of the white noise kernel and the radial basis function kernel. 
+
+The second terms, which represent model complexity, are also equivalent since $|\sigma^2\boldsymbol{\Sigma}^{-1}|=|\mathbf{S}^{-1}|=|\mathbf{K}|$ by Equations \ref{covariance_matrix}, \ref{theta_distribution}, \ref{define_K}, and the identity $|\mathbf{I}+\mathbf{UV}^\top|=|\mathbf{I}+\mathbf{V}^\top\mathbf{U}|$. This gives us
+\begin{equation}
+\begin{split}|\boldsymbol{\Sigma}^{-1}|\sigma^{2N}&=|\mathbf{K}|\\\log|\boldsymbol{\Sigma}^{-1}|+2N\log \sigma&=\log|\mathbf{K}|\end{split}\end{equation}This equality is more remarkable than it appears, because $\boldsymbol{\Sigma}$ is an $N_B\times N_B$ matrix while $\mathbf{K}$ is an $N\times N$ matrix. 
+
+The third terms are trivially equivalent, and the term $N_B\log \sigma_p$ that only exists in the BLR log likelihood goes to zero is when $\sigma_p=1$, which happens in the equivalence we discuss in this document. Even though we can learn the noise parameter $\sigma$ along with the model parameters in some BLR formulations\cite{KoyoteScience}, it requires us to fix a regularization constant $\lambda=\frac{\sigma^2}{\sigma_p^2}$, which now depends on $\sigma$, which is itself determined by predictions when the number of training rows is fewer than the number of basis functions, thus creating an implicit (circular) solution, so there is no free lunch. If we train on our data all at once, we have to learn the noise parameter for a BLR equivalent of a GP the same way we do for learning the kernel hyperparameters, and identically for both formalisms: we minimize the marginal likelihood. Alternatively, you can use the implicit solution formulation presented in Section 3.5.2 in \cite{bishop}, but this requires multiple iterations of the fitting procedure over the entire dataset.
+
+There is a silver lining, however. Online, incremental, or sequential versions of the BLR formalism can update the regularization parameter at each step from an initial guess (usually taken to be close to zero) based on the observed noise parameter. Thus, the implicit solution is iterated over automatically as we add each new row of data. The drawback with this approach is that updating your BLR posteriors one row at a time is computationally inefficient compared to batch processing. On the other hand, there are many applications, such as contextual multi-armed bandits and hyperparameter tuning, where obtaining each row of data is time-intensive, so that incremental solutions are preferred. In these cases, feast on that free lunch all you want.
 
 \printbibliography
 \end{document}
