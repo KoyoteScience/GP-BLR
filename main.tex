@@ -51,7 +51,7 @@ and
 \end{equation} 
 where $\sigma$ is the noise parameter, or the square-root of the sum of squared residuals., and the term $\sigma^2 \mathbf{I}$ provides the uncertainty for repeated measurements of $y$ at the same $\mathbf{x}$.
 
-The equivalent perspective of $L2$ regularization gives us a regularization constant $\lambda=\sigma^2/\sigma_p^2$ where $\sigma_p$ represents the noise term for the prior. This implies that we more strongly regularize our results (draw weights towards zero) as we decrease the noise parameter in the prior compared to the noise parameter in the posterior. 
+The equivalent perspective of $L2$ regularization gives us a regularization constant \begin{equation}\label{eq:lambda}\lambda=\sigma^2/\sigma_p^2\end{equation} where $\sigma_p$ represents the noise term for the prior. This implies that we more strongly regularize our results (draw weights towards zero) as we decrease the noise parameter in the prior compared to the noise parameter in the posterior. 
 
 The above formulation makes it clear how the covariance matrix of our parameters evolves over inference from $\boldsymbol{\Sigma}_p$ to $\boldsymbol{\Sigma}$ and how this affects our predictions. If we don't keep $\sigma$ fixed but instead learn it from our data or use linear algebra identities to define it, we may prefer to work with the quantity 
 \begin{equation}
@@ -188,13 +188,13 @@ Using the identity
 \end{equation}
 we observe that 
 \begin{equation}
+\label{eq:gaussian_integral}
     \int_{-\infty}^{\infty}\exp\left(\frac{(x_0-x''_0)^2)}{2l^2}\right)\exp\left(\frac{(x'_0-x''_0)^2)}{2l^2}\right)dx''\propto\exp\left(\frac{x_0-x'_0}{4l^2}\right)
-\end{equation}.
-That is, if we perform an inner product over all possible $\mathbf{x}''$s for a basis function defined by a kernel with length scale $l$ at points $\mathbf{x}$ and $\mathbf{x}'$, this is equivalent to computing a different kernel between $x$ and $\mathbf{x}''$. To create a basis function set that will return a Gaussian kernel with length scale $l$, the kernel we use to generate that basis function set has the same form but with a length scale proportional to  $l/\sqrt{2}$.
+\end{equation}That is, if we perform an inner product over all possible $\mathbf{x}''$s for a basis function defined by a kernel with length scale $l$ at points $\mathbf{x}$ and $\mathbf{x}'$, this is equivalent to computing a different kernel between $x$ and $\mathbf{x}''$. To create a basis function set that will return a Gaussian kernel with length scale $l$, the kernel we use to generate that basis function set has the same form but with a length scale proportional to  $l/\sqrt{2}$.
 
 Looking back at Equations \ref{BLR_posterior} and \ref{GP_posterior}, we can make the following correspondences for the means
 \begin{equation}
-    \overline{\mathbf{y}_\ast}\sim\sigma^{-2}\boldsymbol{\phi}_\ast \boldsymbol{\Sigma} \boldsymbol{\Phi}^\top \mathbf{y} \sim \mathbf{K}_\ast^\top \mathbf{K}^{-1} \mathbf{y}
+    \overline{\mathbf{y}}_\ast\sim\sigma^{-2}\boldsymbol{\phi}_\ast \boldsymbol{\Sigma} \boldsymbol{\Phi}^\top \mathbf{y} \sim \mathbf{K}_\ast^\top \mathbf{K}^{-1} \mathbf{y}
 \end{equation}
 and the covariances
 \begin{equation}
@@ -203,24 +203,51 @@ and the covariances
 
 The corresponding expressions certainly look similar, but there are noticeable differences. Moreover, they involve matrix multiplications on totally different dimensions: over the training data for GPs, over the basis dimensions for BLRs. It begs the question, what if there were some kernel $k_\text{BLR}(\mathbf{x},\mathbf{x}')$ that could define a basis set 
 \begin{equation}
-    \boldsymbol{\phi}(\mathbf{x})=C(k_\text{BLR}(\mathbf{x},\mathbf{x_0}),k_\text{BLR}(\mathbf{x},\mathbf{x_1}),\dots,k_\text{BLR}(\mathbf{x},\mathbf{x}_{N_B}))
-\end{equation}with a normalization constant $C$ such that the above correspondences could become identities? Note that we also restrict this kernel so that 
+\begin{split}
+    \boldsymbol{\phi}(\mathbf{x})&=Z^{-1}(\mathbf{x})(k_\text{BLR}(\mathbf{x},\mathbf{x}_0),k_\text{BLR}(\mathbf{x},\mathbf{x}_1),\dots,k_\text{BLR}(\mathbf{x},\mathbf{x}_{N_B})) \end{split}
+\end{equation}with normalization constant $Z(\mathbf{x})$ such that the above correspondences could become identities? By first identifying the empirical standard deviation of the targets $\sigma_\mathbf{y}$, we normalize according to
 \begin{equation}
 \label{eq:normalization}
-    C^{-1} = \boldsymbol{\phi}^\top(\mathbf{x})\boldsymbol{\phi}(\mathbf{x}) = 1
-\end{equation}Let us set our prior covariance for the Bayesian linear regression to
+\begin{split}
+    Z(\mathbf{x}) &= \sigma_\mathbf{y}^{-2}\sqrt{\sum_{i=0}^{N_B}k_\text{BLR}(\mathbf{x},\mathbf{x}_i)^2} \\
+    \sigma_\mathbf{y}^2 &= \boldsymbol{\phi}(\mathbf{x})^\top\boldsymbol{\phi}(\mathbf{x})
+\end{split}
+\end{equation}and by setting our prior covariance for the Bayesian linear regression to
+\begin{equation}
+\label{eq:set_sigma_p_to_one}
+\begin{split}
+   \boldsymbol{\Sigma}_p=\mathbf{I}\\\sigma_p=1
+   \end{split}
+\end{equation}we achieve the equivalence we've been looking for. 
+
+In other words, we assume our prior weights have a mean of zero, are uncorrelated, and have a spread in their means equal to unity regardless of $k_\text{BLR}$, since the basis functions $\boldsymbol{\phi}(\mathbf{x})$ are normalized by Equation \ref{eq:normalization}. When looking at our predictions using this normalization, we see the standard deviation of their distributions vary in magnitude, from zero when predictions are close to the training data, to as large as $\sigma_\mathbf{y}$ when predictions are far from the training data. In the latter domain, the meaning of setting $\sigma_p=1$ becomes clear: It is equivalent to the spread in the model parameter distribution when no data has reduced the spread of our predictions.
+
+We can deepen our intuition behind the prior noise parameter by first observing that far from the training data, we have $\boldsymbol{\phi}_\ast^\top\boldsymbol{\Phi}\approx 0$. Due to the Woodbury matrix identity, we can derive
+\begin{equation}
+    \left(I + UV \right)^{-1} = I -U \left(I + VU \right)^{-1} V
+\end{equation}so that when we look far from the training data, the prediction covariance is
 \begin{equation}
 \begin{split}
-   \boldsymbol{\Sigma}_p= \mathbf{I}\\\sigma_p=1
-   \end{split}
-\end{equation}that is, we assume our prior weights have a mean of zero, are uncorrelated, and have a spread in their means equal to unity.  At first, setting the spread to unity may seem arbitrary, but remember that the weights correspond to basis functions rather than raw observations, and these basis functions are normalized by Equation \ref{eq:normalization}. 
-Let us also set 
+\text{cov}(\mathbf{y}_\ast)&=\boldsymbol{\phi}_\ast^\top\boldsymbol{\Sigma}\boldsymbol{\phi}_\ast + \sigma^2  \\ 
+&=  \sigma^2\left( \boldsymbol{\phi}_\ast^\top\left(\frac{\sigma^2}{\sigma_p^2}\mathbf{I}_{N_B}+\boldsymbol{\Phi}\boldsymbol{\Phi}^\top\right)^{-1}\boldsymbol{\phi}_\ast+1\right) \\
+&= \sigma^2\left( \frac{\sigma_p^2}{\sigma^2}\boldsymbol{\phi}_\ast^\top\left(\mathbf{I}_{N_B}+\frac{\sigma_p^2}{\sigma^2}\boldsymbol{\Phi}\boldsymbol{\Phi}^\top\right)^{-1}\boldsymbol{\phi}_\ast+1\right) \\
+&= \sigma^2\left( \frac{\sigma_p^2}{\sigma^2}\boldsymbol{\phi}_\ast^\top\left(\mathbf{I}_{N_B}-\frac{\sigma_p^2}{\sigma^2}\boldsymbol{\Phi}\left(\mathbf{I}_{N_B}+\frac{\sigma_p^2}{\sigma^2}\boldsymbol{\Phi}\boldsymbol{\Phi}^\top\right)^{-1}\boldsymbol{\Phi}^\top\right)\boldsymbol{\phi}_\ast+1\right) \\
+&= \sigma_p^2\boldsymbol{\phi}_\ast^\top\boldsymbol{\phi}_\ast + \sigma^2 -\frac{\sigma_p^4}{\sigma^2}\boldsymbol{\phi}_\ast^\top\boldsymbol{\Phi}\left(\mathbf{I}_{N_B}+\frac{\sigma_p^2}{\sigma^2}\boldsymbol{\Phi}\boldsymbol{\Phi}^\top\right)^{-1}\boldsymbol{\Phi}^\top\boldsymbol{\phi}_\ast \\
+&\approx\sigma_p^2\boldsymbol{\phi}_\ast^\top\boldsymbol{\phi}_\ast + \sigma^2
+\end{split}
+\end{equation} 
+By Equations \ref{eq:set_sigma_p_to_one} and \ref{eq:normalization}, we obtain 
+\begin{equation}
+\text{cov}(\mathbf{y}_\ast)\approx\sigma_\mathbf{y}^2 + \sigma^2
+\end{equation}
+
+We honor Equation \ref{eq:gaussian_integral} by setting
 \begin{equation}
     k_\text{BLR}(x_0,x'_0)=\exp\left(\frac{x_0-x'_0}{4l^2}\right)
-\end{equation}What we will arrive at is a Bayesian linear regression that produces the same predictions as the Gaussian process regression with kernel
+\end{equation}and we arrive at a Bayesian linear regression that produces the same predictions as the Gaussian process regression with kernel
 \begin{equation}
     k_\text{GP}(x_0,x'_0)=\exp\left(\frac{x_0-x'_0}{2l^2}\right)
-\end{equation}because the normalization constants will balance each other out, and the model will learn new coefficients for each basis dimension that account for whatever constants haven't been figured out.
+\end{equation} due to the normalization in Equation \ref{eq:normalization}.
 
 Note that in this case, the posterior covariance isn't proportional to $k_\text{GP}$ for the same reason that it isn't proportional to $K_{\ast\ast}$ in Equation \ref{GP_posterior} or $\Sigma_p^{-1}$ in Equation \ref{BLR_posterior}. Rather, if we describe the posterior covariance as a pure kernel function, it would look something like 
 \begin{equation}
@@ -229,7 +256,7 @@ Note that in this case, the posterior covariance isn't proportional to $k_\text{
 \end{equation}\begin{equation}
 \label{equivalen_kernel}
     k_\text{equiv.} = C\sigma\boldsymbol{\Sigma}^{1/2}k_\text{BLR}^\top(\mathbf{x}_\ast,\mathbf{x})
-\end{equation}which means that inferencing on the posterior mixes up the basis functions defined by $k_\text{BLR}$ according to the operator $\boldsymbol{\Sigma}^{1/2}$, which is defined by performing a summation over the training points (just like with a Gaussian process).  For examples of this basis function set, see Figure \ref{fig:basis_large_width}.
+\end{equation}which means that inference on the posterior mixes up the basis functions defined by $k_\text{BLR}$ according to the operator $\boldsymbol{\Sigma}^{1/2}$, which is defined by performing a summation over the training points (just like with a Gaussian process).  For examples of this basis function set, see Figure \ref{fig:basis_large_width}.
 
 What's a little weird about this equation is that it implies our covariance matrix would see its exponents divide by two due to the square root, but because of the identity of integrating over the product of two Gaussians in Equation \ref{gaussian_integral_identity}, it actually multiplies by two. Similarly, in Section \ref{sec:hyperparameter_tuning}, the derivation for computing the log marginal likelihood of the BLR (Equation \ref{eq:log_likelihood_BLR}) requires integrating over the product of two multivariate norms. The result inverts its proportionality with the determinant of the covariance matrix compared to either of the original multivariate norms.
 
@@ -302,7 +329,7 @@ What happens to the eigenbasis when we change the width of the kernel? For small
 There is meaning held in the eigenvalues $\text{diag}(\mathbf{D})$. If we look at the eigenvalues for the linear system \begin{equation}\left(\sigma_p^{-2}\boldsymbol{\Phi}\boldsymbol{\Phi}^\top\right)\mathbf{u}_i=\mathbf{u}_i\end{equation} defined by $(\lambda_1,\lambda_2,\dots,\lambda_N)=\sigma_p^{-2}\text{diag}(\mathbf{D})$, by Section 3.5.3 of \cite{bishop}, we see that the quantity
 \begin{equation}
 \gamma=\sum_{i=1}^{N}\frac{\lambda_i}{\sigma_p^{-2} + \lambda_i}
-\end{equation} defines the effective number of parameters by which we can alter our noise parameter \begin{equation}\sigma_\text{unbaised}=\sigma\frac{N}{N-\gamma}\end{equation} to get the unbaised covariance matrix \begin{equation}\boldsymbol{\Sigma}_\text{unbaised}^{-1}=\sigma_\text{unbiased}^{-2}\boldsymbol{\Phi}\boldsymbol{\Phi}^\top+\boldsymbol{\Sigma}_p^{-1}\end{equation} of our model parameters $\boldsymbol{\theta}$. Note that whether we use the biased or unbiased noise parameter and covariance matrix does not affect our mean predictions, as shown in Equations \ref{eq:define_S} through \ref{BLR_posterior} , at least from the perspective where the regularization constant $\lambda=\sigma^2/\sigma_p^2$ is kept constant (not to be confused with the eigenvalues  $\lambda_i$).
+\end{equation} defines the effective number of parameters by which we can alter our noise parameter \begin{equation}\sigma_\text{unbaised}=\sigma\frac{N}{N-\gamma}\end{equation} to get the unbaised covariance matrix \begin{equation}\boldsymbol{\Sigma}_\text{unbaised}^{-1}=\sigma_\text{unbiased}^{-2}\boldsymbol{\Phi}\boldsymbol{\Phi}^\top+\boldsymbol{\Sigma}_p^{-1}\end{equation} of our model parameters $\boldsymbol{\theta}$. Note that whether we use the biased or unbiased noise parameter and covariance matrix does not affect our mean predictions, as shown in Equations \ref{eq:define_S} through \ref{BLR_posterior} , at least from the perspective where the regularization constant defined in Equation \ref{eq:lambda} is kept constant (not to be confused with the eigenvalues  $\lambda_i$).
 
 Note that \cite{bishop} is mostly interested in how $\gamma$ alters with $\sigma_p$, that is, how it changes with the regularization constant $\lambda$. However, we fix $\sigma_p=1$ when equating BLR with GP so we are interested in how $\gamma$ alters with our other model hyperparameters. Given the same set of training data of $N$ rows, we find that we can cause $\gamma$ to asymptotically approach $N$ with two changes: increase the number of basis functions (centers of Gaussian distributions), and/or decrease the noise parameter $\sigma$. In other words, both changes to the problem increase the ability and need of the model to resolve more information than can be offered by just a few (well-chosen) basis functions. In the regime of many data points and fewer basis functions, $\gamma$ will asymptotically approach the number of basis functions as we increase $\sigma$.
 
@@ -385,9 +412,7 @@ For the Gaussian process, we also obtain the log marginal likelihood through int
 \end{equation}and noting that $\mathcal{N}(\mathbf{x}|\mathbf{y},\boldsymbol{\Sigma}_f)=\mathcal{N}(\mathbf{y}|\mathbf{x},\boldsymbol{\Sigma}_f)$, we arrive at Equations 2.30 and 5.8 in \cite{rasmussen}:
 \begin{equation}
     \log p(\mathbf{y}|\mathbf{X},\mathbf{K}_\text{RBF}) = -\frac{1}{2}\left((\mathbf{y}-\overline{\mathbf{f}})^\top \mathbf{K}^{-1} (\mathbf{y}-\overline{\mathbf{f}}) \right) - \frac{1}{2}\log|\mathbf{K}| - \frac{N}{2}\log 2\pi
-\end{equation}where the vertical bars represent the determinant operator and $\mathbf{K}=\mathbf{K}_\text{RBF}+\sigma^2 \mathbf{I}_N$. Note that the term $\overline{\mathbf{f}}$ is the mean function of the GP (that is, the mean of our measured input data targets, or the intercept in BLR) replicated for every point in $\mathbf{X}$. We can make $\overline{\mathbf{f}}$ non-zero by adding a constant between every pair of points to the kernel $\mathbf{K}_\text{RBF}$.
-
-Given these likelihoods, you can also optimize the noise parameter and length scales of the equivalent BLR the same way that is canon with GPs: you perform multiple gradient descents in the negative log marginal likelihood, since the landscape is pretty smooth, although not convex, and therefore may have multiple local minima. Note that it's also possible to compute the noise parameter along with the model parameters in the Bayesian linear regression formalism\cite{KoyoteScience}, leaving only the kernel hyperparameters to tune.
+\end{equation}where the vertical bars represent the determinant operator and $\mathbf{K}=\mathbf{K}_\text{RBF}+\sigma^2 \mathbf{I}_N$. Note that the term $\overline{\mathbf{f}}$ is the mean function of the GP (that is, the mean of our measured input data targets, or the intercept in BLR) replicated for every point in $\mathbf{X}$. We can make $\overline{\mathbf{f}}$ non-zero by adding a constant between every pair of points to the kernel $\mathbf{K}_\text{RBF}$. Given these likelihoods, you can also optimize the noise parameter and length scales of the equivalent BLR the same way that is canon with GPs: you perform multiple gradient descents in the negative log marginal likelihood, since the landscape is pretty smooth, although not convex, and therefore may have multiple local minima. 
 
 Diving in more deeply, we see that the first terms, which represent the data fit, are equivalent:
 \begin{equation}
@@ -398,9 +423,10 @@ The second terms, which represent model complexity, are also equivalent since $|
 \begin{equation}
 \begin{split}|\boldsymbol{\Sigma}^{-1}|\sigma^{2N}&=|\mathbf{K}|\\\log|\boldsymbol{\Sigma}^{-1}|+2N\log \sigma&=\log|\mathbf{K}|\end{split}\end{equation}This equality is more remarkable than it appears, because $\boldsymbol{\Sigma}$ is an $N_B\times N_B$ matrix while $\mathbf{K}$ is an $N\times N$ matrix. 
 
-The third terms are trivially equivalent, and the term $N_B\log \sigma_p$ that only exists in the BLR log likelihood goes to zero is when $\sigma_p=1$, which happens in the equivalence we discuss in this document. Even though we can learn the noise parameter $\sigma$ along with the model parameters in some BLR formulations\cite{KoyoteScience}, it requires us to fix a regularization constant $\lambda=\frac{\sigma^2}{\sigma_p^2}$, which now depends on $\sigma$, which is itself determined by predictions when the number of training rows is fewer than the number of basis functions, thus creating an implicit (circular) solution, so there is no free lunch. If we train on our data all at once, we have to learn the noise parameter for a BLR equivalent of a GP the same way we do for learning the kernel hyperparameters, and identically for both formalisms: we minimize the marginal likelihood. Alternatively, you can use the implicit solution formulation presented in Section 3.5.2 in \cite{bishop}, but this requires multiple iterations of the fitting procedure over the entire dataset.
+The third terms are trivially equivalent, and the term $N_B\log \sigma_p$ that only exists in the BLR log likelihood goes to zero is when $\sigma_p=1$, which happens in the equivalence we discuss in this document. Even though we can learn the noise parameter $\sigma$ along with the model parameters in some BLR formulations\cite{KoyoteScience}, it requires us to fix a regularization constant defined in Equation \ref{eq:lambda}, which now depends on $\sigma$, which is itself determined by predictions when the number of training rows is fewer than the number of basis functions, thus creating an implicit (circular) solution, so there is no free lunch. If we train on our data all at once, we have to learn the noise parameter for a BLR equivalent of a GP the same way we do for learning the kernel hyperparameters, and identically for both formalisms: we minimize the marginal likelihood. Alternatively, you can use the implicit solution formulation presented in Section 3.5.2 in \cite{bishop}, but this requires multiple iterations of the fitting procedure over the entire dataset.
 
 There is a silver lining, however. Online, incremental, or sequential versions of the BLR formalism can update the regularization parameter at each step from an initial guess (usually taken to be close to zero) based on the observed noise parameter. Thus, the implicit solution is iterated over automatically as we add each new row of data. The drawback with this approach is that updating your BLR posteriors one row at a time is computationally inefficient compared to batch processing. On the other hand, there are many applications, such as contextual multi-armed bandits and hyperparameter tuning, where obtaining each row of data is time-intensive, so that incremental solutions are preferred. In these cases, feast on that free lunch all you want.
+
 
 \printbibliography
 \end{document}
