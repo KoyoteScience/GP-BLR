@@ -97,7 +97,9 @@ and
 \label{BLR_posterior}
     y_\ast(\mathbf{x}_\ast)\sim\mathcal{N}\left(\sigma^{-2}\boldsymbol{\phi}_\ast  \boldsymbol{\Sigma} \boldsymbol{\Phi}^\top\mathbf{y} ,\boldsymbol{\phi}^\top_\ast \boldsymbol{\Sigma}\boldsymbol{\phi}_\ast+ \sigma^2\right)
 \end{equation} 
-with the associated matrix multiplications on the scale $N_\ast \times(N_B \times N_B) \times (N_B \times N_B) \times (N \times N)$ for the mean and $N_\ast \times (N_B \times N_B) \times (N_B \times N_B) \times N_\ast$ for the covariance. In other words, we most of our summations are over the basis dimensionality $N_B$ and some over the training set dimensionality $N$.
+with the associated matrix multiplications on the scale $N_\ast \times(N_B \times N_B) \times (N_B \times N_B) \times (N \times N)$ for the mean and $N_\ast \times (N_B \times N_B) \times (N_B \times N_B) \times N_\ast$ for the covariance. In other words, we most of our summations are over the basis dimensionality $N_B$ and some over the training set dimensionality $N$. An example Bayesian linear regression can be seen in Figures  \ref{fig:priors_and_posteriors} \ref{fig:example_regression}.
+
+Note that for fixed $\sigma$ and $\sigma_p$, we set our prior parameters $\boldsymbol{\theta}=\mathbf{0}$ to zero and the covariance matrix of those parameters $\boldsymbol{\Sigma}_p=\frac{\sigma_p^2}{\sigma^2}\mathbf{I}_{N_B}$. In other words, our model parameters are uncorrelated with a mean of zero, which can be seen by the flat prior mean and predictive uncertainty in Figure \ref{fig:example_regression}. When we sample our model parameters for the posterior, however, the covariance matrix will exhibit off-diagonal entries that correlate the model parameters with each other due to the fact that basis functions overlap. This added correlation is not required to generate smooth samples of our prediction distribution. As can be seen in Figure \ref{fig:priors_and_posteriors}, our priors are just as smooth as our posteriors, even though if we were to plot the centers of each basis function multiplied by their weights, the prior would be a random noise plot and the posterior would be smooth. The reason the priors are still smooth despite having a diagonal covariance matrix is that the random fluctuations of the parameters add up over the extended basis functions to produce a smooth sum.
 
 Meanwhile, the alternative formulation gives us 
 \begin{equation}
@@ -150,14 +152,32 @@ This is a distribution over the observations and the new test points (denoted wi
 \mathbf{y}_\ast\sim\mathcal{N}\left(\mathbf{K}_\ast^\top \mathbf{K}^{-1}\mathbf{y},\mathbf{K}_{\ast\ast}-\mathbf{K}_\ast^\top \mathbf{K}^{-1}\mathbf{K}_\ast \right)
 \end{equation}
 
-Note that the Gaussian process formalism presented here assumes that the variance of our targets $\sigma_\mathbf{y}$ is equal to one. However, we can adjust for this by regressing against $\mathbf{y}/\sigma_\mathbf{y}$ and then multiplying our predictions $\sigma_\mathbf{y}$ (and similarly for the prediction standard deviations). The calculations for a Gaussian process require summations in the matrix multiplication at the scale of $N_\ast \times (N \times N) \times (N \times N)$ for the mean and $N_ast \times (N \times N) \times (N \times N) \times N_\ast$ for the covariance, thus all summations are over the training set dimensionality $N$ rather than the basis set dimensionality $N_B$, which never appears in the GP. This is the essence of the "kernel trick". An example Gaussian process regression can be seen in Figure \ref{fig:example_regression}.
+Note that the Gaussian process formalism presented here assumes that the variance of our targets $\sigma_\mathbf{y}$ is equal to one. However, we can adjust for this by regressing against $\mathbf{y}/\sigma_\mathbf{y}$ and then multiplying our predictions $\sigma_\mathbf{y}$ (and similarly for the prediction standard deviations). Later, we will show that the variance can be tuned by how we normalize our kernel. The calculations for a Gaussian process require summations in the matrix multiplication at the scale of $N_\ast \times (N \times N) \times (N \times N)$ for the mean and $N_ast \times (N \times N) \times (N \times N) \times N_\ast$ for the covariance, thus all summations are over the training set dimensionality $N$ rather than the basis set dimensionality $N_B$, which never appears in the GP. This is the essence of the "kernel trick". An example Gaussian process regression can be seen in Figures  \ref{fig:priors_and_posteriors} \ref{fig:example_regression}.
 
 \begin{figure}
     \begin{center}
+    \includegraphics[width=0.75\linewidth]{prior_samples}
+    \includegraphics[width=0.75\linewidth]{posterior_samples}
+    \caption{The Bayesian linear regression and Gaussian process models both define a distribution of functions that fit our data and which are defined by the hyperparameters of the corresponding model. For the GP, these hyperparameters are the kernel function. For the BLR, these hyperparameters are the basis functions and the ratio $\sigma^2/\sigma_p^2$. Fitting to the data is equivalent to filtering the distribution of prior functions to the distribution of posterior functions, which can be seen by Bayes rule $\text{posterior}\propto\text{likelihood}\times\text{prior}$. At top, we show ten samples of the prior functions, and at bottom, ten samples of the posterior functions for the data show in red sampled from the objective. Figure \ref{fig:example_regression} shows a simplification of the bottom plot, replacing the samples with their mean and two standard deviations. This figure was created with the associated code on Github.}
+    \label{fig:priors_and_posteriors}
+    \end{center}
+\end{figure}
+
+\begin{figure}
+    \begin{center}
+    \includegraphics[width=0.75\linewidth]{prior_regression_results}
     \includegraphics[width=0.75\linewidth]{regression_results}
-    \includegraphics[width=0.75\linewidth]{regression_results2}
-    \caption{Regression results for all three approaches for an objective function that is a sine wave. Top: with wavelength set to 0.2, a Gaussian kernel with length scale set to 0.5, the noise parameter set to 0.1, with 1000 basis centers spread across a domain from -2 to 3, and 50 training data points spread equidistantly over a domain from 0 to 1. Bottom: with wavelength set to 1, length scale set to 0.1, noise parameter set to 0.01, with 1000 basis centers spread across a domain from -5 to 5, and 5 training data points spread equidistantly over a domain from 0 to 1. Two standard deviations of the prediction distribution are shown in blue. This figure was created with the associated code on Github.}
+    \caption{Regression results for all three approaches for an objective function that is a sine wave, matching Figure \ref{fig:priors_and_posteriors} but now showing the mean (blue line) and two standard deviations of the prediction uncertainty (blue area). At top, the prior, and at bottom, the posterior. The wavelength is set to 0.5, a Gaussian kernel with length scale set to 0.5, the noise parameter set to 0.1, with 1000 basis centers spread across a domain from -2 to 3, and 20 training data points spread equidistantly over a domain from 0 to 1. This figure was created with the associated code on Github.}
     \label{fig:example_regression}
+    \end{center}
+\end{figure}
+
+\begin{figure}
+    \begin{center}
+    \includegraphics[width=0.75\linewidth]{regression_results2}
+    \caption{
+     Regression results for all three approaches for an objective function that is a sine wave. Here the wavelength set to 1, length scale set to 0.1, noise parameter set to 0.01, with 1000 basis centers spread across a domain from -5 to 5, and 5 training data points spread equidistantly over a domain from 0 to 1. The mean is presented with a blue line, and two standard deviations of the prediction uncertainty in the blue area, with the training data and objective in red. Since the length scale is now smaller than the distance between training data points, we see that the prediction uncertainty billows out between them. This figure was created with the associated code on Github.}
+    \label{fig:example_regression2}
     \end{center}
 \end{figure}
 
