@@ -5,16 +5,21 @@ from os.path import expanduser
 
 
 # from https://scikit-learn.org/stable/auto_examples/gaussian_process/plot_gpr_noisy_targets.html
-def plot_prediction_uncertainty_and_data(x, f, X, y, y_pred, sigma, ylim=None, xlim=None, title=''):
+def plot_prediction_uncertainty_and_data(x, f, X, y, y_pred, sigma=None, ylim=None, xlim=None, title='', filename='regression_results.png'):
     plt.clf()
     plt.figure()
     plt.plot(x, f(x), 'r:', label=r'$f(x) = objective$')
     plt.plot(X, y, 'r.', markersize=10, label='Observations')
-    plt.plot(x, y_pred, 'b-', label='Prediction')
-    plt.fill(np.concatenate([x, x[::-1]]),
-             np.concatenate([y_pred - 1.9600 * sigma,
-                             (y_pred + 1.9600 * sigma)[::-1]]),
-             alpha=.5, fc='b', ec='None', label='95% confidence interval')
+    if isinstance(y_pred, (tuple, list, np.ndarray)) and isinstance(y_pred[0], (tuple, list, np.ndarray)) and len(y_pred[0]) > 1:
+        for row_index, y_pred_row in enumerate(y_pred):
+            plt.plot(x, y_pred_row, 'b-', label='Prediction' if row_index == 0 else None)
+    else:
+        plt.plot(x, y_pred, 'b-', label='Prediction')
+    if sigma is not None:
+        plt.fill(np.concatenate([x, x[::-1]]),
+                 np.concatenate([y_pred - 1.9600 * sigma,
+                                 (y_pred + 1.9600 * sigma)[::-1]]),
+                 alpha=.5, fc='b', ec='None', label='95% confidence interval')
     plt.xlabel('$x$')
     plt.ylabel('$f(x)$')
     if ylim is not None:
@@ -23,7 +28,7 @@ def plot_prediction_uncertainty_and_data(x, f, X, y, y_pred, sigma, ylim=None, x
         plt.xlim(xlim[0], xlim[1])
     plt.legend(loc='upper left')
     plt.title(title)
-    plt.savefig(expanduser('~/Downloads/regression_results.png'), dpi=300)
+    plt.savefig(expanduser('~/Downloads/' + filename), dpi=300)
     plt.show()
 
 
@@ -87,7 +92,7 @@ def kernel(X1, X2=None, widths=None, noise_parameter=0.0, mean=0.0, add_constant
 # Settings
 ######
 
-compare_specialized_modules = True
+compare_specialized_modules = False # this requires access to our libraries which aren't yet public
 basis_domain = (-5, 5)
 plot_domain = (-1, 2)
 training_domain = (0, 1)
@@ -365,8 +370,11 @@ if compare_specialized_modules:
         sampling_factors=number_of_basis_functions,
         widths=[x / np.sqrt(2) for x in widths]
     )  # note that kernel_noise_parameter default is 0
+    BLR_object_prior_predictions, BLR_object_prior_sigmas = BLR_object.predict(X, return_std=True)
+    BLR_object_prior_sample_y = [BLR_object.sample_y(X) for _ in range(10)]
     BLR_object.fit(X_train, Y_train)
     BLR_object_predictions, BLR_object_sigmas = BLR_object.predict(X, return_std=True)
+    BLR_object_posterior_sample_y = [BLR_object.sample_y(X) for _ in range(10)]
 
     BLALR_object = BasisAdapter(
         regressor=BayesLinearAlgebraLinearRegressor(
@@ -436,6 +444,28 @@ if render_plots:
     )
 
     if compare_specialized_modules:
+        plot_prediction_uncertainty_and_data(
+            X, objective, X_train, Y_train, BLR_object_prior_predictions, BLR_object_prior_sigmas,
+            plot_range,
+            plot_domain,
+            'Bayesian Linear Regression Prior',
+            'prior_regression_results.png'
+        )
+        plot_prediction_uncertainty_and_data(
+            X, objective, X_train, Y_train, BLR_object_prior_sample_y, None,
+            plot_range,
+            plot_domain,
+            'Bayesian Linear Regression Prior Samples',
+            'prior_samples.png'
+        )
+        plot_prediction_uncertainty_and_data(
+            X, objective, X_train, Y_train, BLR_object_posterior_sample_y, None,
+            plot_range,
+            plot_domain,
+            'Bayesian Linear Regression Posterior Samples',
+            'posterior_samples.png'
+        )
+        
         plot_prediction_uncertainty_and_data(
             X, objective, X_train, Y_train, BLR_learn_sigma_object_predictions, BLR_learn_sigma_object_sigmas,
             plot_range,
