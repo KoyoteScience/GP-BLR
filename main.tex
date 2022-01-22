@@ -4,8 +4,13 @@
 \usepackage{biblatex} 
 \usepackage{authblk}
 \usepackage{mathtools}
-\usepackage{hyperref}
+\usepackage{xurl}
+\usepackage[hidelinks]{hyperref}
 \addbibresource{three_books.bib}
+\usepackage{lastpage}
+\usepackage{fancyhdr}
+\usepackage{textcomp}
+
 
 \title{Gaussian processes and their equivalent Bayesian linear regressions}
 \author[1]{Douglas Mason}
@@ -15,6 +20,17 @@
 \begin{document}
 
 \maketitle
+
+\tableofcontents
+
+\pagestyle{fancy}
+% \fancyhf{}
+\cfoot{\\
+\\
+\includegraphics[scale=0.15,valign=c]{koyote_science_logo.png}
+}
+\lhead{Page \thepage}
+\rhead{Section \thesection}
 
 \section{Introduction}
 
@@ -362,9 +378,17 @@ Note that whether we use the biased or unbiased noise parameter and covariance m
 
 When \cite{bishop} examines Equation {eq:gamma}, the text is mostly interested in how $\gamma$ alters with $\sigma_p$ by way of the regularization constant $\lambda$. However, we fix $\sigma_p=\sigma_\mathbf{y}$ when equating BLR with GP so we are more interested in how $\gamma$ alters with our other model hyperparameters. Given the same set of training data of $N$ rows, we find that we can cause $\gamma$ to asymptotically approach $N$ with two changes: increase the number of basis functions (centers of Gaussian distributions), and/or decrease the noise parameter $\sigma$. In other words, both changes to the problem increase the ability and need of the model to resolve more information than can be offered by just a few (well-chosen) basis functions. In the regime of many data points and fewer basis functions, $\gamma$ will asymptotically approach the number of basis functions as we increase $\sigma$.
 
-We can perform a couple of simplifications to the procedure outlined in this section by considering two ways to reduce the computational complexity: (1) reduce the number of basis centers so that they are spaced according to the length scales of the original kernel and (2) reduce the number of eigenvectors (by filtering out those with small eigenvalues). The first works well, except when the variation in the training set y-values is greater than can be afforded by the length scale of the kernel. A GP or equivalent BLR will fit more closely to these widely-varying observations than one with a sparser basis set. 
+\section{Reducing order complexity with BLR and GP}
+
+Most methods for reducing the complexity of GP regressions fall under the domain of "sparse Gaussian processes", which are covered in Chapter 8 of \cite{rasmussen}. Their general gist, taken from the Nystrom method\cite{nystrom}, is that we can approximate the kernel matrix $K$ by one built from a subset of training data points. How we choose that subset is an open field of research, but the general approach is to choose points that don't overlap with each other too often, which can be accomplished with greedy algorithms in an online fashion (only add points to your subset when they are sufficiently far from the others, and remove points that are closest to others). Of course, a random subset is perfectly suitable, and the Nystrom method is a particularly effective and efficient approximation to calculating the top principle components of the kernel matrix.
+
+When working with the BLR formalism, we can perform a couple of simplifications to the procedure outlined in the previous section by considering two ways to reduce the computational complexity: (1) reduce the number of basis centers so that they are spaced according to the length scales of the original kernel and (2) reduce the number of eigenvectors (by filtering out those with small eigenvalues). The first works well, except when the variation in the training set y-values is greater than can be afforded by the length scale of the kernel. A GP or equivalent BLR will fit more closely to these widely-varying observations than one with a sparser basis set. 
 
 Similarly, the second approach loses spatial resolution in proportion to how many eigenvectors are discarded, and in our experience, we found this approach to be very prone to meaningfully changing your calculations. Note that just as is the case with the manually-derived basis functions, the BLR will only produce equivalent predictions within the domain that the basis functions are not infinitesimally small.
+
+The benefit of BLR over GP is, of course, the reduced order complexity when $N_\text{basis}\ll N_\text{data}$. But how do we choose basis functions that best reflect the kernel we are approximating? The obvious choice presented in the previous section is to sample kernels at centers equally spaced in the domain of interest. But what if we don't know the domain of interest?
+
+Just as Gaussian and sparse random projections\cite{random_projection} allow us to perform dimensionality reduction on general inputs, we can use random Fourier features\cite{random_fourier_features}\footnote{This paper won the NIPS 2017 "test of time" paper award one decade later, and the acceptance speech is a piece of ML history. Source:  \url{https://www.youtube.com/watch?v=Qi1Yry33TQE} }  to perform dimensionality reduction on inputs that we wish to model with a shift-invariant, i.e., radial basis, kernel. In the procedure, frequencies are sampled from a standard normal distribution and phases are sampled uniformly over the domain $[0,2\pi]$. This approach approximates the limited interaction features that are supported by a radial basis kernel, but not all interactions generally. Note that the eigenstates in Figures \ref{fig:basis_large_width} and \ref{fig:basis_small_width} are also approximated by cosine waves, and in fact, they are exactly cosine waves when the domain of interest extends to positive and negative infinity, but the distribution of their wave vectors  don't match the random Fourier features.
 
 \section{Tuning the noise parameter and kernel hyperparameters in both formalisms}\label{sec:hyperparameter_tuning}
 
